@@ -1,11 +1,3 @@
-"""
-Zero-Shot Robustness Test for LunarLander-v3.
-
-Evaluates 6 trained agents (DQN, Double DQN, Dueling DDQN, PPO, REINFORCE, A2C-V)
-across 3 environments (Standard, High-Wind, Low-Gravity) with 50 episodes each.
-All evaluations are zero-shot: no weight updates are performed.
-"""
-
 import sys
 import json
 import numpy as np
@@ -22,7 +14,7 @@ sys.path.insert(0, str(PROJECT_ROOT / "examples" / "LunarLander_A2C-V(Q)"))
 import robust_gymnasium as gym
 from robust_gymnasium.configs.robust_setting import get_config
 
-# ─── Configuration ────────────────────────────────────────────────────────────
+# Configuration
 
 NUM_EPISODES = 50
 MAX_STEPS = 1000
@@ -48,11 +40,7 @@ AGENTS_ORDER = ["DQN", "Double DQN", "Dueling DDQN", "PPO", "REINFORCE", "A2C-V"
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-
-# ─── Network Definitions (must match training architectures exactly) ──────────
-
 class QNetwork(nn.Module):
-    """DQN / Double DQN: 8→128→128→4"""
     def __init__(self, state_dim=8, action_dim=4, hidden=128):
         super().__init__()
         self.net = nn.Sequential(
@@ -66,7 +54,6 @@ class QNetwork(nn.Module):
 
 
 class DuelingQNetwork(nn.Module):
-    """Dueling DDQN: shared 8→256, then V-stream and A-stream"""
     def __init__(self, state_dim=8, action_dim=4, hidden=256):
         super().__init__()
         self.feature = nn.Sequential(nn.Linear(state_dim, hidden), nn.ReLU())
@@ -85,7 +72,6 @@ class DuelingQNetwork(nn.Module):
 
 
 class ActorNetwork(nn.Module):
-    """PPO actor: 8→64→64→4 with Tanh, softmax output"""
     def __init__(self, state_dim=8, action_dim=4, hidden=64):
         super().__init__()
         self.net = nn.Sequential(
@@ -99,7 +85,6 @@ class ActorNetwork(nn.Module):
 
 
 class PolicyNetwork(nn.Module):
-    """REINFORCE: 8→128→128→4 with ReLU, raw logits"""
     def __init__(self, state_dim=8, action_dim=4, hidden=128):
         super().__init__()
         self.net = nn.Sequential(
@@ -112,8 +97,7 @@ class PolicyNetwork(nn.Module):
         return self.net(x)
 
 
-# ─── Model Loading ────────────────────────────────────────────────────────────
-
+# Model Loading 
 def _load_state_dict(cls, key, **kwargs):
     model = cls(**kwargs).to(DEVICE)
     model.load_state_dict(torch.load(MODEL_PATHS[key], map_location=DEVICE, weights_only=True))
@@ -144,17 +128,14 @@ def load_all_models():
     return models
 
 
-# ─── Greedy Action Selection ─────────────────────────────────────────────────
-
+# Greedy Action Selection
 def greedy_action(model, state):
-    """Deterministic argmax action for any Q-network or policy network."""
     with torch.no_grad():
         state_t = torch.tensor(state, dtype=torch.float32, device=DEVICE).unsqueeze(0)
         return int(model(state_t).argmax(dim=-1).item())
 
 
-# ─── Evaluation ───────────────────────────────────────────────────────────────
-
+# Evaluation
 def build_robust_args():
     args = get_config().parse_args([])
     args.noise_factor = "none"
@@ -166,7 +147,6 @@ def build_robust_args():
 
 
 def evaluate_simple_agent(model, env_config, num_episodes=NUM_EPISODES):
-    """Evaluate any model that takes raw state and returns Q-values/logits/probs."""
     robust_args = build_robust_args()
     env = gym.make("LunarLander-v3", **env_config)
     rewards = []
@@ -224,7 +204,7 @@ def evaluate_a2c_agent(actor_critic, obs_rms, env_config, num_episodes=NUM_EPISO
     return rewards[:num_episodes]
 
 
-# ─── Main ─────────────────────────────────────────────────────────────────────
+# Main
 
 def main():
     RESULTS_DIR.mkdir(parents=True, exist_ok=True)
@@ -271,7 +251,6 @@ def main():
 
 
 def print_summary_table(results):
-    """Print a formatted summary table."""
     print(f"\n{'='*96}")
     print(f"{'Zero-Shot Robustness Test Summary':^96}")
     print(f"{'='*96}")

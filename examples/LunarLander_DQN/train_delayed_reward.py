@@ -1,20 +1,3 @@
-"""
-Delayed Reward Structure Analysis for DQN on LunarLander-v3 (Discrete).
-
-Trains DQN under five reward delivery modes:
-  baseline  – original LunarLander reward (dense potential-based shaping)
-  dense     – original + extra per-step shaping (centering, orientation, landing)
-  medium_10 – accumulated reward delivered every 10 steps
-  medium_20 – accumulated reward delivered every 20 steps
-  sparse    – accumulated reward delivered only at episode end
-
-After training each configuration, evaluates the agent and collects step-level
-metrics (Q-values, TD-errors, delivered vs original rewards).  A robustness
-sweep over varying delay lengths is also performed.
-
-All results are saved to results/delayed_reward/experiment_results.pkl
-for post-hoc visualization by visualize_delayed_reward.py.
-"""
 
 import os
 import random
@@ -30,7 +13,7 @@ import torch.optim as optim
 import robust_gymnasium as gym
 from robust_gymnasium.configs.robust_setting import get_config
 
-# ─── Hyperparameters (consistent with train_dqn.py) ──────────────────────────
+# Hyperparameters
 ENV_NAME       = "LunarLander-v3"
 SEED           = 42
 TOTAL_EPISODES = 500
@@ -58,17 +41,8 @@ REWARD_CONFIGS = {
 }
 
 
-# ─── Delayed-Reward Wrapper ──────────────────────────────────────────────────
+# Delayed-Reward Wrapper
 class DelayedRewardWrapper:
-    """Intercepts environment rewards and controls *when* they are delivered.
-
-    Modes
-    -----
-    baseline : pass-through (no modification)
-    dense    : original reward + mild extra shaping
-    medium   : accumulate rewards, deliver every `delay_steps` steps
-    sparse   : accumulate rewards, deliver only at episode termination
-    """
 
     def __init__(self, env, mode="baseline", delay_steps=1):
         self.env = env
@@ -124,7 +98,7 @@ class DelayedRewardWrapper:
         self.env.close()
 
 
-# ─── Q-Network ───────────────────────────────────────────────────────────────
+#Q-Network
 class QNetwork(nn.Module):
     def __init__(self, state_dim, action_dim, hidden=HIDDEN_DIM):
         super().__init__()
@@ -138,7 +112,7 @@ class QNetwork(nn.Module):
         return self.net(x)
 
 
-# ─── Replay Buffer ───────────────────────────────────────────────────────────
+# Replay Buffer
 class ReplayBuffer:
     def __init__(self, capacity):
         self.buf = deque(maxlen=capacity)
@@ -157,7 +131,7 @@ class ReplayBuffer:
         return len(self.buf)
 
 
-# ─── DQN Agent ───────────────────────────────────────────────────────────────
+# DQN Agent
 class DQNAgent:
     def __init__(self, state_dim, action_dim, device):
         self.action_dim = action_dim
@@ -216,9 +190,8 @@ class DQNAgent:
         self.epsilon = max(EPS_END, self.epsilon * EPS_DECAY)
 
 
-# ─── Training Loop ───────────────────────────────────────────────────────────
+# Training Loop
 def train(wrapper, agent, args, n_episodes):
-    """Train DQN agent; returns list of per-episode *original* rewards."""
     rewards_history = []
     recent = deque(maxlen=100)
 
@@ -250,9 +223,8 @@ def train(wrapper, agent, args, n_episodes):
     return rewards_history
 
 
-# ─── Evaluation ──────────────────────────────────────────────────────────────
+#Evaluation
 def evaluate(wrapper, agent, args, n_episodes):
-    """Greedy evaluation collecting step-level metrics for visualization."""
     episodes = []
     for ep in range(n_episodes):
         state, _ = wrapper.reset(seed=SEED + 80000 + ep)
@@ -267,7 +239,6 @@ def evaluate(wrapper, agent, args, n_episodes):
             ns, delivered, term, trunc, info = wrapper.step(robust_input)
             done = term or trunc
 
-            # TD-error magnitude: |δ| = |r + γ·max Q(s',·) − Q(s,a)|
             nq = agent.q_values(ns)
             td_target = delivered + GAMMA * np.max(nq) * (1.0 - float(done))
             td_err = abs(td_target - qv[action])
@@ -285,7 +256,7 @@ def evaluate(wrapper, agent, args, n_episodes):
     return episodes
 
 
-# ─── Main ────────────────────────────────────────────────────────────────────
+#Main 
 def main():
     os.makedirs(SAVE_DIR, exist_ok=True)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -298,7 +269,7 @@ def main():
     results = {}
     t0 = time.time()
 
-    # ── Phase 1: train & evaluate each reward configuration ──────────────────
+    # train and evaluate each reward configuration
     for name, cfg in REWARD_CONFIGS.items():
         print(f"{'='*60}")
         print(f"[{name.upper()}] mode={cfg['mode']}, delay={cfg['delay']}")
@@ -324,7 +295,7 @@ def main():
         torch.save(agent.qnet.state_dict(),
                    os.path.join(SAVE_DIR, f"dqn_{name}.pth"))
 
-    # ── Phase 2: robustness sweep over delay values ──────────────────────────
+    #  robustness sweep over delay values
     print(f"\n{'='*60}")
     print("ROBUSTNESS SWEEP – varying reward delay")
     print(f"{'='*60}")
@@ -360,7 +331,7 @@ def main():
 
     results["robustness"] = rob
 
-    # ── Save ─────────────────────────────────────────────────────────────────
+    #  Save 
     pkl_path = os.path.join(SAVE_DIR, "experiment_results.pkl")
     with open(pkl_path, "wb") as f:
         pickle.dump(results, f)

@@ -1,17 +1,3 @@
-"""
-Generates six publication-quality visualizations from the delayed reward
-experiment results saved by train_delayed_reward.py.
-
-Plots
------
-1. Reward Timeline      – delivered vs original reward per timestep
-2. Return Variance      – Var(return-to-go) across episodes per timestep
-3. Value Prediction     – mean Q(s,a) trajectory over an episode
-4. Credit Assignment    – TD-error magnitude heatmap (episodes × timesteps)
-5. Robustness Curve     – final performance vs reward delay length
-6. Learning Curve       – training episode reward for each reward structure
-"""
-
 import os
 import pickle
 import numpy as np
@@ -56,9 +42,8 @@ def _save(fig, name):
     print(f"  [SAVED] {name}")
 
 
-# ─── 1. Reward Timeline ──────────────────────────────────────────────────────
+#  Reward Timeline 
 def plot_reward_timeline(R):
-    # Clamp y-axis to avoid terminal reward spikes (+100/−100) stretching scale
     Y_LIM = (-30, 30)
     fig, axes = plt.subplots(5, 1, figsize=(14, 13), sharex=True)
     for i, name in enumerate(CONFIGS):
@@ -77,7 +62,6 @@ def plot_reward_timeline(R):
         ax.plot(t, original, color="gray", alpha=0.55,
                 linewidth=0.8, label="Original reward")
 
-        # Annotate bars whose true value exceeds the visible y range
         for arr, va, y_anchor in [
             (raw_del, "bottom", Y_LIM[1] - 1),   # overflow above
             (raw_del, "top",    Y_LIM[0] + 1),    # overflow below
@@ -108,7 +92,7 @@ def plot_reward_timeline(R):
     _save(fig, "1_reward_timeline.png")
 
 
-# ─── 2. Return Variance ──────────────────────────────────────────────────────
+# Return Variance 
 def plot_return_variance(R):
     fig, ax = plt.subplots(figsize=(10, 6))
     for name in CONFIGS:
@@ -130,7 +114,7 @@ def plot_return_variance(R):
     _save(fig, "2_return_variance.png")
 
 
-# ─── 3. Value Prediction ─────────────────────────────────────────────────────
+# Value Prediction
 def plot_value_prediction(R):
     fig, ax = plt.subplots(figsize=(10, 6))
     for name in CONFIGS:
@@ -152,7 +136,7 @@ def plot_value_prediction(R):
     _save(fig, "3_value_prediction.png")
 
 
-# ─── 4. Credit Assignment Heatmap ────────────────────────────────────────────
+#  Credit Assignment Heatmap 
 def plot_credit_assignment(R):
     from matplotlib.colors import LogNorm
     fig, axes = plt.subplots(1, 5, figsize=(20, 5))
@@ -165,11 +149,10 @@ def plot_credit_assignment(R):
             L = len(evals[j]["td_errors"])
             mat[j, :L] = evals[j]["td_errors"]
 
-        # Log-scale normalization so small TD-errors are visually distinct
         valid = mat[np.isfinite(mat) & (mat > 0)]
         vmin = max(valid.min(), 1e-2) if len(valid) else 1e-2
         vmax = valid.max() if len(valid) else 1.0
-        # Replace 0 / NaN with vmin for log safety; NaN stays gray
+
         mat_log = np.where(np.isfinite(mat) & (mat > 0), mat, vmin)
         mat_log[~np.isfinite(mat)] = np.nan
 
@@ -187,7 +170,7 @@ def plot_credit_assignment(R):
     _save(fig, "4_credit_assignment.png")
 
 
-# ─── 5. Delayed Reward Robustness ────────────────────────────────────────────
+#  Delayed Reward Robustness
 def plot_robustness(R):
     data = R["robustness"]
     delays = data["delays"]
@@ -215,7 +198,7 @@ def plot_robustness(R):
     _save(fig, "5_robustness.png")
 
 
-# ─── 6. Learning Curve ───────────────────────────────────────────────────────
+#  Learning Curve 
 def plot_learning_curve(R):
     fig, ax = plt.subplots(figsize=(12, 6))
     window = 30
@@ -239,7 +222,7 @@ def plot_learning_curve(R):
     _save(fig, "6_learning_curve.png")
 
 
-# ─── Summary Table ───────────────────────────────────────────────────────────
+# Summary Table 
 def print_summary(R):
     print("\n" + "=" * 70)
     print("  Delayed Reward Experiment – Summary")
@@ -254,7 +237,7 @@ def print_summary(R):
     print("=" * 70)
 
 
-# ─── Main ────────────────────────────────────────────────────────────────────
+# Main
 def main():
     print("[INFO] Loading experiment results …")
     R = load_results()

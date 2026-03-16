@@ -1,9 +1,3 @@
-"""
-DQN Agent for Robust Gymnasium LunarLander-v3 (Discrete).
-Standard DQN with epsilon-greedy exploration, experience replay, and target network.
-No perturbation applied (noise_factor="none").
-"""
-
 import os
 import random
 import numpy as np
@@ -20,7 +14,7 @@ import torch.optim as optim
 import robust_gymnasium as gym
 from robust_gymnasium.configs.robust_setting import get_config
 
-# ─── Hyperparameters ─────────────────────────────────────────────────────────
+# Hyperparameters 
 ENV_NAME        = "LunarLander-v3"
 SEED            = 42
 TOTAL_EPISODES  = 1000
@@ -32,16 +26,15 @@ BUFFER_SIZE     = 100_000
 TAU             = 1e-3          # soft-update rate for target network
 EPS_START       = 1.0
 EPS_END         = 0.01
-EPS_DECAY       = 0.995         # multiplicative decay per episode
+EPS_DECAY       = 0.995        # multiplicative decay per episode
 HIDDEN_DIM      = 128
 UPDATE_EVERY    = 4             # learn every N steps
-SOLVE_SCORE     = 200.0         # task considered solved
+SOLVE_SCORE     = 200.0 # task considered solved
 SAVE_DIR        = "results/train_dqn"
 
 
-# ─── Q-Network ───────────────────────────────────────────────────────────────
+# Q-Network 
 class QNetwork(nn.Module):
-    """Simple MLP Q-network with two hidden layers."""
     def __init__(self, state_dim: int, action_dim: int, hidden: int = HIDDEN_DIM):
         super().__init__()
         self.net = nn.Sequential(
@@ -56,9 +49,8 @@ class QNetwork(nn.Module):
         return self.net(x)
 
 
-# ─── Replay Buffer ───────────────────────────────────────────────────────────
+# Replay Buffer 
 class ReplayBuffer:
-    """Fixed-size experience replay buffer."""
     def __init__(self, capacity: int):
         self.buffer = deque(maxlen=capacity)
 
@@ -80,9 +72,8 @@ class ReplayBuffer:
         return len(self.buffer)
 
 
-# ─── DQN Agent ───────────────────────────────────────────────────────────────
+# DQN Agent 
 class DQNAgent:
-    """DQN agent with epsilon-greedy policy and soft target-network updates."""
     def __init__(self, state_dim: int, action_dim: int, device: torch.device):
         self.action_dim = action_dim
         self.device = device
@@ -114,7 +105,7 @@ class DQNAgent:
             self._learn()
 
     def _learn(self):
-        """Sample a batch and perform one gradient step (standard DQN loss)."""
+        """Sample a batch and perform one gradient step"""
         states, actions, rewards, next_states, dones = self.buffer.sample(BATCH_SIZE)
 
         states_t      = torch.tensor(states, device=self.device)
@@ -139,11 +130,9 @@ class DQNAgent:
         nn.utils.clip_grad_norm_(self.qnet.parameters(), max_norm=1.0)
         self.optimizer.step()
 
-        # Soft-update target network
         self._soft_update()
 
     def _soft_update(self):
-        """Polyak averaging: θ_target ← τ·θ_online + (1-τ)·θ_target"""
         for tp, op in zip(self.target_net.parameters(), self.qnet.parameters()):
             tp.data.copy_(TAU * op.data + (1.0 - TAU) * tp.data)
 
@@ -151,9 +140,8 @@ class DQNAgent:
         self.epsilon = max(EPS_END, self.epsilon * EPS_DECAY)
 
 
-# ─── Visualization ───────────────────────────────────────────────────────────
+#Visualization 
 def plot_results(scores: list, avg_scores: list, epsilons: list, save_dir: str):
-    """Generate and save training curves."""
     os.makedirs(save_dir, exist_ok=True)
     episodes = range(1, len(scores) + 1)
 
@@ -181,9 +169,7 @@ def plot_results(scores: list, avg_scores: list, epsilons: list, save_dir: str):
     print(f"[INFO] Training curves saved to {save_dir}/training_curves.png")
 
 
-# ─── Animation ────────────────────────────────────────────────────────────────
 def record_animation(agent, args, save_dir: str, num_episodes: int = 3):
-    """Run trained agent and save a GIF animation of the best episode."""
     env = gym.make(ENV_NAME, render_mode="rgb_array")
     best_frames, best_reward = [], -float("inf")
 
@@ -228,13 +214,13 @@ def record_animation(agent, args, save_dir: str, num_episodes: int = 3):
     print(f"[INFO] Animation saved to {gif_path}")
 
 
-# ─── Main Training Loop ─────────────────────────────────────────────────────
+#  Main Training Loop 
 def main():
     os.makedirs(SAVE_DIR, exist_ok=True)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"[INFO] Device: {device}")
 
-    # Robust-Gymnasium config (no perturbation)
+    # Robust-Gymnasium config
     args = get_config().parse_args([])
     args.noise_factor = "none"          # disable all perturbations
     args.noise_sigma  = 0.0
@@ -261,7 +247,6 @@ def main():
         for _ in range(MAX_STEPS):
             action = agent.select_action(state)
 
-            # Robust-Gymnasium expects dict input
             robust_input = {
                 "action": action,
                 "robust_type": "action",
@@ -296,10 +281,7 @@ def main():
     torch.save(agent.qnet.state_dict(), os.path.join(SAVE_DIR, "dqn_final.pth"))
     env.close()
 
-    # Plot training curves
     plot_results(scores, avg_scores, epsilons, SAVE_DIR)
-
-    # Record animation of trained agent
     record_animation(agent, args, SAVE_DIR)
     print("[INFO] Training complete.")
 

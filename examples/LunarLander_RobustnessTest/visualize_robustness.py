@@ -1,13 +1,3 @@
-"""
-Visualization for Zero-Shot Robustness Test results.
-
-Generates:
-  1. Box-plot comparison (all algorithms × all environments)
-  2. Grouped bar chart with error bars (mean ± std)
-  3. Performance drop heatmap (relative to standard environment)
-  4. Radar chart (robustness profile)
-"""
-
 import json
 import numpy as np
 from pathlib import Path
@@ -34,7 +24,6 @@ def load_results():
 
 
 def plot_boxplot(results):
-    """Side-by-side box plots: one group per environment, one box per algorithm."""
     fig, axes = plt.subplots(1, 3, figsize=(20, 6), sharey=True)
 
     for ax_idx, env in enumerate(ENVS):
@@ -66,7 +55,6 @@ def plot_boxplot(results):
 
 
 def plot_grouped_bar(results):
-    """Grouped bar chart: mean reward ± std for each (algorithm, environment) pair."""
     n_agents = len(AGENTS)
     x = np.arange(n_agents)
     bar_width = 0.24
@@ -98,7 +86,6 @@ def plot_grouped_bar(results):
 
 
 def plot_heatmap(results):
-    """Heatmap showing performance drop (%) relative to Standard environment."""
     matrix = np.zeros((len(AGENTS), len(ENVS)))
     for i, agent in enumerate(AGENTS):
         std_mean = np.mean(results[f"{agent}_Standard"])
@@ -137,7 +124,6 @@ def plot_heatmap(results):
 
 
 def plot_radar(results):
-    """Radar chart showing each algorithm's robustness profile."""
     metrics = []
     for env in ENVS:
         for stat_fn, label in [(np.mean, "Mean"), (lambda x: -np.std(x), "Consistency")]:

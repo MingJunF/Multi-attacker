@@ -1,8 +1,3 @@
-"""
-Perturbation Comparison Experiment for DQN on LunarLander-v3.
-Trains DQN under different perturbation settings and compares stability.
-Uses the same DQN components from train_dqn.py.
-"""
 
 import os
 import random
@@ -21,7 +16,7 @@ import torch.optim as optim
 import robust_gymnasium as gym
 from robust_gymnasium.configs.robust_setting import get_config
 
-# ─── Hyperparameters ─────────────────────────────────────────────────────────
+#  Hyperparameters 
 ENV_NAME        = "LunarLander-v3"
 SEED            = 42
 TOTAL_EPISODES  = 800
@@ -39,8 +34,7 @@ UPDATE_EVERY    = 4
 SOLVE_SCORE     = 200.0
 SAVE_DIR        = "results/train_dqn_perturbation"
 
-# ─── Perturbation Configs ────────────────────────────────────────────────────
-# Each config: (label, noise_factor, noise_type, noise_sigma)
+# Perturbation Configs 
 PERTURBATION_CONFIGS = [
     ("No Perturbation",         "none",   "gauss", 0.0),
     ("State Gauss σ=0.01",      "state",  "gauss", 0.01),
@@ -52,7 +46,7 @@ PERTURBATION_CONFIGS = [
 ]
 
 
-# ─── Q-Network ───────────────────────────────────────────────────────────────
+#  Q-Network
 class QNetwork(nn.Module):
     def __init__(self, state_dim: int, action_dim: int, hidden: int = HIDDEN_DIM):
         super().__init__()
@@ -66,7 +60,7 @@ class QNetwork(nn.Module):
         return self.net(x)
 
 
-# ─── Replay Buffer ───────────────────────────────────────────────────────────
+#  Replay Buffer
 class ReplayBuffer:
     def __init__(self, capacity):
         self.buffer = deque(maxlen=capacity)
@@ -85,7 +79,7 @@ class ReplayBuffer:
         return len(self.buffer)
 
 
-# ─── DQN Agent ───────────────────────────────────────────────────────────────
+#  DQN Agent 
 class DQNAgent:
     def __init__(self, state_dim, action_dim, device):
         self.action_dim = action_dim
@@ -136,7 +130,7 @@ class DQNAgent:
         self.epsilon = max(EPS_END, self.epsilon * EPS_DECAY)
 
 
-# ─── Single Experiment Run ──────────────────────────────────────────────────
+#  Single Experiment Run 
 def train_single(label, noise_factor, noise_type, noise_sigma, device):
     """Train DQN under one perturbation setting. Returns scores and avg_scores."""
     print(f"\n{'='*60}")
@@ -201,7 +195,7 @@ def train_single(label, noise_factor, noise_type, noise_sigma, device):
     }
 
 
-# ─── Record Best Episode ────────────────────────────────────────────────────
+#  Record Best Episode
 def record_best_episode(agent, args, device, num_eval=3):
     """Evaluate agent for a few episodes and return frames of the best one."""
     env = gym.make(ENV_NAME, render_mode="rgb_array")
@@ -228,15 +222,13 @@ def record_best_episode(agent, args, device, num_eval=3):
     return best_frames
 
 
-# ─── Visualization ───────────────────────────────────────────────────────────
+#  Visualization
 def plot_comparison(results, save_dir):
-    """Generate comparison plots for all perturbation experiments."""
     os.makedirs(save_dir, exist_ok=True)
 
-    # --- 1. Training curves comparison ---
+    # Training curves comparison 
     fig, axes = plt.subplots(1, 2, figsize=(16, 6))
 
-    # State perturbation group
     ax = axes[0]
     for r in results:
         if "State" in r["label"] or "No Perturbation" in r["label"]:
@@ -264,7 +256,7 @@ def plot_comparison(results, save_dir):
     fig.savefig(os.path.join(save_dir, "perturbation_training_curves.png"), dpi=150)
     plt.close(fig)
 
-    # --- 2. Final performance bar chart ---
+    #  Final performance bar chart 
     fig, ax = plt.subplots(figsize=(12, 5))
     labels = [r["label"] for r in results]
     means  = [r["final_avg"] for r in results]
@@ -281,7 +273,6 @@ def plot_comparison(results, save_dir):
     ax.legend()
     ax.grid(axis="y", alpha=0.3)
 
-    # Value labels on bars
     for bar, m in zip(bars, means):
         ax.text(bar.get_x() + bar.get_width() / 2, bar.get_height() + 5,
                 f"{m:.1f}", ha="center", va="bottom", fontsize=8)
@@ -290,7 +281,7 @@ def plot_comparison(results, save_dir):
     fig.savefig(os.path.join(save_dir, "perturbation_bar_chart.png"), dpi=150)
     plt.close(fig)
 
-    # --- 3. All training curves on one plot ---
+    #All training curves on one plot 
     fig, ax = plt.subplots(figsize=(12, 6))
     for r in results:
         ax.plot(r["avg_scores"], label=r["label"], linewidth=1.5)
@@ -308,7 +299,6 @@ def plot_comparison(results, save_dir):
 
 
 def save_animations(results, save_dir):
-    """Save GIF animation for each experiment."""
     os.makedirs(save_dir, exist_ok=True)
     for r in results:
         frames = r["frames"]
@@ -352,13 +342,13 @@ def save_summary(results, save_dir):
     with open(os.path.join(save_dir, "summary.txt"), "w") as f:
         f.write(summary_text)
 
-    # JSON summary (without frames)
+    # JSON summary 
     json_data = [{k: v for k, v in r.items() if k != "frames"} for r in results]
     with open(os.path.join(save_dir, "summary.json"), "w") as f:
         json.dump(json_data, f, indent=2)
 
 
-# ─── Main ────────────────────────────────────────────────────────────────────
+# Main
 def main():
     os.makedirs(SAVE_DIR, exist_ok=True)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -370,7 +360,6 @@ def main():
         result = train_single(label, nf, nt, ns, device)
         results.append(result)
 
-    # Generate all outputs
     plot_comparison(results, SAVE_DIR)
     save_animations(results, SAVE_DIR)
     save_summary(results, SAVE_DIR)
