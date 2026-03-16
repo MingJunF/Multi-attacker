@@ -106,6 +106,10 @@ python examples/LunarLander_DQN/visualize_delayed_reward.py
 # Q-bias experiments
 python examples/LunarLander_QBias_Experiment1/experiment_1A_overestimation_bias.py
 python examples/LunarLander_QBias_Experiment1/experiment_1B_dueling_value_advantage.py
+
+# 6 Algorithm Robustness Tests (High Wind, Low Gravity)
+python examples/LunarLander_RobustnessTest/robustness_test.py
+python examples/LunarLander_RobustnessTest/visualize_robustness.py
 ```
 
 ## Notes on Robust Gymnasium interface
