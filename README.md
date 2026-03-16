@@ -25,7 +25,7 @@ It is designed as a practical benchmark to compare classic and modern RL methods
 - **Q-value overestimation bias** (DQN vs Double DQN)
 - **Value-Advantage decomposition analysis** (Dueling architecture)
 
-## Project structure (LunarLander part)
+## Project structure (LunarLander v3-Discrete)
 
 ```text
 examples/
