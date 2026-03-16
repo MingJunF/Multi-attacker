@@ -1,17 +1,3 @@
-"""
-Experiment 1A: Quantify overestimation bias in DQN vs Double DQN on LunarLander-v3.
-
-What this script does
----------------------
-1) Train DQN and Double DQN under the same setup.
-2) Every N episodes, run greedy evaluation rollouts.
-3) On the visited evaluation states, compare:
-    Q_predict(s_t) = max_a Q(s_t, a)
-    G_true(s_t)    = sum_{k>=0} gamma^k r_{t+k}
-4) Log overestimation gap: Q_predict - G_true.
-5) Save aligned plots and metrics.
-"""
-
 from __future__ import annotations
 
 import argparse
@@ -94,7 +80,6 @@ class ReplayBuffer:
 
 
 class DQNFamilyAgent:
-    """One class for both DQN and Double DQN (toggle with use_double)."""
 
     def __init__(self, state_dim: int, action_dim: int, device: torch.device, cfg: ExpConfig, use_double: bool):
         self.action_dim = action_dim
@@ -190,7 +175,7 @@ def evaluate_overestimation_on_policy(
     robust_cfg,
     eval_seed_base: int,
 ) -> Tuple[float, float, float, float]:
-    """Evaluate Q overestimation on visited states using true discounted returns."""
+
     env = gym.make(cfg.env_name)
 
     q_preds_all: List[float] = []
