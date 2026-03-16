@@ -1,16 +1,3 @@
-"""
-Experiment 1B: Visualize Dueling decomposition (V(s) and A(s,a)) on LunarLander-v3.
-
-Goal
-----
-Compare Double DQN vs Dueling Double DQN, then inspect one evaluation episode.
-For Dueling network, log per-step:
-- chosen action
-- V(s)
-- A(s,a) for all 4 actions
-Focus on a high-altitude free-fall window and visualize V(s) vs max_a A(s,a).
-"""
-
 from __future__ import annotations
 
 import argparse
