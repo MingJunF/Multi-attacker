@@ -1,24 +1,3 @@
-"""
-Dueling Double DQN + Prioritized Experience Replay (PER)
-for Robust Gymnasium LunarLander-v3 (Discrete).
-
-Improvements over vanilla DQN
-------------------------------
-1. Double DQN target:
-     online net selects next action → target net evaluates it
-     reduces Q-value overestimation bias
-2. Dueling architecture:
-     Q(s,a) = V(s) + A(s,a) - mean_a[A(s,a)]
-     separates state value estimation from action advantage,
-     accelerates learning in states where action choice matters less
-3. Prioritized Experience Replay (PER):
-     sample transitions proportional to |TD-error|^alpha
-     improves sample efficiency by focusing on high-error transitions
-     importance-sampling weights (beta, annealed 0.4→1.0) correct the bias
-
-No perturbation applied (noise_factor="none"). Serves as the strong baseline.
-"""
-
 import os
 import random
 from collections import deque
@@ -35,8 +14,6 @@ import torch.optim as optim
 import robust_gymnasium as gym
 from robust_gymnasium.configs.robust_setting import get_config
 
-
-# ── Hyperparameters ───────────────────────────────────────────────────────────
 ENV_NAME       = "LunarLander-v3"
 SEED           = 42
 TOTAL_EPISODES = 1000
@@ -49,26 +26,16 @@ TAU            = 1e-3
 EPS_START      = 1.0
 EPS_END        = 0.01
 EPS_DECAY      = 0.995
-HIDDEN_DIM     = 256    # wider than vanilla DQN/DDQN (128) to give Dueling streams room
+HIDDEN_DIM     = 256
 UPDATE_EVERY   = 4
 SOLVE_SCORE    = 200.0
 SAVE_DIR       = "results/train_dueling_double_dqn"
 
-# PER hyperparameters
-PER_ALPHA  = 0.6   # prioritization exponent  (0 = uniform, 1 = full priority)
-BETA_START = 0.4   # IS-weight annealing start (biased sampling)
-BETA_END   = 1.0   # IS-weight annealing end   (unbiased sampling)
+PER_ALPHA  = 0.6
+BETA_START = 0.4
+BETA_END   = 1.0
 
-
-# ── Dueling Q-Network ─────────────────────────────────────────────────────────
 class DuelingQNetwork(nn.Module):
-    """
-    Shared feature extractor feeding two separate heads:
-      - value_stream  : scalar  V(s)
-      - advantage_stream: vector A(s, a) for each action
-    Aggregation: Q(s,a) = V(s) + A(s,a) - mean_a'[A(s,a')]
-    Mean-subtraction ensures identifiability (otherwise V and A are underdetermined).
-    """
 
     def __init__(self, state_dim: int, action_dim: int, hidden: int = HIDDEN_DIM):
         super().__init__()
@@ -93,17 +60,7 @@ class DuelingQNetwork(nn.Module):
         advantage = self.advantage_stream(feat)    # (batch, n_actions)
         return value + advantage - advantage.mean(dim=1, keepdim=True)
 
-
-# ── Prioritized Replay Buffer ─────────────────────────────────────────────────
 class PrioritizedReplayBuffer:
-    """
-    Proportional PER (O(n) sampling — sufficient for 100 k capacity).
-
-    push()  : stores transition; new entries get max existing priority so they
-              are replayed at least once before being updated.
-    sample(): returns batch + indices + IS weights.
-    update_priorities(): refreshes priorities with fresh |TD-error| values.
-    """
 
     def __init__(self, capacity: int, alpha: float = PER_ALPHA):
         self.capacity  = capacity
@@ -128,9 +85,8 @@ class PrioritizedReplayBuffer:
         probs = prios / prios.sum()
         indices = np.random.choice(self.size, batch_size, replace=False, p=probs)
 
-        # Importance-sampling weights — corrects non-uniform sampling bias
         weights = (self.size * probs[indices]) ** (-beta)
-        weights /= weights.max()   # normalize so max weight = 1
+        weights /= weights.max()
 
         batch = [self.buffer[i] for i in indices]
         states, actions, rewards, next_states, dones = zip(*batch)
@@ -151,10 +107,7 @@ class PrioritizedReplayBuffer:
     def __len__(self):
         return self.size
 
-
-# ── Agent ─────────────────────────────────────────────────────────────────────
 class DuelingDDQNAgent:
-    """Dueling Double DQN + PER agent with soft target updates."""
 
     def __init__(self, state_dim: int, action_dim: int, device: torch.device):
         self.action_dim = action_dim
@@ -169,7 +122,6 @@ class DuelingDDQNAgent:
         self.epsilon    = EPS_START
         self.step_count = 0
 
-    # ── Action selection ──────────────────────────────────────────────────────
     def select_action(self, state: np.ndarray) -> int:
         if random.random() < self.epsilon:
             return random.randrange(self.action_dim)
@@ -177,14 +129,12 @@ class DuelingDDQNAgent:
         with torch.no_grad():
             return int(self.qnet(s).argmax(dim=1).item())
 
-    # ── Environment interaction ───────────────────────────────────────────────
     def step(self, state, action, reward, next_state, done, beta: float = 0.4):
         self.buffer.push(state, action, reward, next_state, done)
         self.step_count += 1
         if self.step_count % UPDATE_EVERY == 0 and len(self.buffer) >= BATCH_SIZE:
             self._learn(beta)
 
-    # ── Learning update ───────────────────────────────────────────────────────
     def _learn(self, beta: float):
         states, actions, rewards, next_states, dones, indices, weights = \
             self.buffer.sample(BATCH_SIZE, beta)
@@ -199,20 +149,17 @@ class DuelingDDQNAgent:
         q_pred = self.qnet(s).gather(1, a)
 
         with torch.no_grad():
-            # Double DQN: online net picks best action, target net evaluates it
             best_next_a = self.qnet(ns).argmax(dim=1, keepdim=True)
             q_next      = self.target_net(ns).gather(1, best_next_a)
             q_target    = r + GAMMA * q_next * (1.0 - d)
 
         td_errors = (q_pred - q_target).detach().cpu().numpy().flatten()
 
-        # Huber loss weighted by IS weights (more robust to outliers than MSE)
         element_loss = nn.functional.smooth_l1_loss(q_pred, q_target, reduction="none")
         loss = (w * element_loss).mean()
 
         self.optimizer.zero_grad()
         loss.backward()
-        # Larger clip norm for Dueling because gradients flow through two separate streams
         nn.utils.clip_grad_norm_(self.qnet.parameters(), max_norm=10.0)
         self.optimizer.step()
 
@@ -227,7 +174,6 @@ class DuelingDDQNAgent:
         self.epsilon = max(EPS_END, self.epsilon * EPS_DECAY)
 
 
-# ── Visualization ─────────────────────────────────────────────────────────────
 def plot_results(scores: list, avg_scores: list, epsilons: list, save_dir: str):
     os.makedirs(save_dir, exist_ok=True)
     episodes = range(1, len(scores) + 1)
@@ -293,8 +239,6 @@ def record_animation(agent: DuelingDDQNAgent, args, save_dir: str, num_episodes:
     plt.close(fig)
     print(f"[INFO] Animation saved to {gif_path}")
 
-
-# ── Main ──────────────────────────────────────────────────────────────────────
 def main():
     os.makedirs(SAVE_DIR, exist_ok=True)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -320,7 +264,6 @@ def main():
     solved = False
 
     for ep in range(1, TOTAL_EPISODES + 1):
-        # Linearly anneal IS-weight correction: biased early, unbiased late
         beta = min(BETA_END, BETA_START + (BETA_END - BETA_START) * ep / TOTAL_EPISODES)
 
         state, _ = env.reset(seed=SEED + ep)
