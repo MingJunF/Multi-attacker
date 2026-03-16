@@ -9,7 +9,7 @@ import torch.nn.functional as F
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(PROJECT_ROOT))
-sys.path.insert(0, str(PROJECT_ROOT / "examples" / "LunarLander_A2C-V(Q)"))
+sys.path.insert(0, str(PROJECT_ROOT / "examples" / "LunarLander_A2C"))
 
 import robust_gymnasium as gym
 from robust_gymnasium.configs.robust_setting import get_config
@@ -27,7 +27,7 @@ MODEL_PATHS = {
     "Dueling DDQN": PROJECT_ROOT / "results" / "train_dueling_double_dqn" / "dueling_ddqn_final.pth",
     "PPO":          PROJECT_ROOT / "results" / "train_ppo" / "ppo_final.pth",
     "REINFORCE":    PROJECT_ROOT / "results" / "train_reinforce_normalization" / "reinforce_final.pth",
-    "A2C-V":        PROJECT_ROOT / "results" / "train_A2C-V(Q)" / "v" / "seed_1" / "models" / "best_model.pt",
+    "A2C-V":        PROJECT_ROOT / "results" / "train_A2C" / "v" / "seed_1" / "models" / "best_model.pt",
 }
 
 ENV_CONFIGS = {

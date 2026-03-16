@@ -5,7 +5,7 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
-SAVE_DIR = "results/delayed_reward"
+SAVE_DIR = "results/delayed_reward_dqn"
 CONFIGS  = ["baseline", "dense", "medium_10", "medium_20", "sparse"]
 
 COLORS = {
