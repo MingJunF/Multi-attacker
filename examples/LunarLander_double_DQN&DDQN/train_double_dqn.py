@@ -1,10 +1,3 @@
-"""
-Double DQN Agent for Robust Gymnasium LunarLander-v3 (Discrete).
-Uses epsilon-greedy exploration, experience replay, target network,
-and Double DQN target computation.
-No perturbation applied (noise_factor="none").
-"""
-
 import os
 import random
 from collections import deque
@@ -21,8 +14,6 @@ import torch.optim as optim
 import robust_gymnasium as gym
 from robust_gymnasium.configs.robust_setting import get_config
 
-
-# Hyperparameters
 ENV_NAME = "LunarLander-v3"
 SEED = 42
 TOTAL_EPISODES = 1000
@@ -40,9 +31,7 @@ UPDATE_EVERY = 4
 SOLVE_SCORE = 200.0
 SAVE_DIR = "results/train_double_dqn"
 
-
 class QNetwork(nn.Module):
-    """Simple MLP Q-network with two hidden layers."""
 
     def __init__(self, state_dim: int, action_dim: int, hidden: int = HIDDEN_DIM):
         super().__init__()
@@ -59,7 +48,6 @@ class QNetwork(nn.Module):
 
 
 class ReplayBuffer:
-    """Fixed-size experience replay buffer."""
 
     def __init__(self, capacity: int):
         self.buffer = deque(maxlen=capacity)
@@ -83,7 +71,6 @@ class ReplayBuffer:
 
 
 class DoubleDQNAgent:
-    """Double DQN agent with epsilon-greedy exploration and soft target updates."""
 
     def __init__(self, state_dim: int, action_dim: int, device: torch.device):
         self.action_dim = action_dim
@@ -115,7 +102,6 @@ class DoubleDQNAgent:
             self._learn()
 
     def _learn(self):
-        """Run one Double DQN update from a replay batch."""
         states, actions, rewards, next_states, dones = self.buffer.sample(BATCH_SIZE)
 
         states_t = torch.tensor(states, dtype=torch.float32, device=self.device)
@@ -150,7 +136,6 @@ class DoubleDQNAgent:
 
 
 def plot_results(scores: list, avg_scores: list, epsilons: list, save_dir: str):
-    """Generate and save training curves."""
     os.makedirs(save_dir, exist_ok=True)
     episodes = range(1, len(scores) + 1)
 
@@ -177,7 +162,6 @@ def plot_results(scores: list, avg_scores: list, epsilons: list, save_dir: str):
 
 
 def record_animation(agent, args, save_dir: str, num_episodes: int = 3):
-    """Run the trained agent and save a GIF for the best rollout."""
     env = gym.make(ENV_NAME, render_mode="rgb_array")
     best_frames, best_reward = [], -float("inf")
 
