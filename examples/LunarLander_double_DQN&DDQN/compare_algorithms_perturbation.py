@@ -1,30 +1,3 @@
-"""
-Cross-Algorithm Robustness Comparison: DQN vs Double DQN vs Dueling DDQN+PER
-under State and Reward perturbations on LunarLander-v3.
-
-Research question
------------------
-Do algorithmic improvements (Double DQN, Dueling+PER) maintain or even widen
-their performance advantage when the environment is perturbed?
-
-Experiment matrix
------------------
-Algorithms   : DQN | Double DQN | Dueling DDQN+PER
-Perturbations: no noise | state σ=0.05 | state σ=0.1 | reward σ=5.0 | reward σ=10.0
-                                                                                    
-Total runs   : 3 × 5 = 15, each 600 episodes.
-
-Outputs (all saved to SAVE_DIR)
----------------------------------
-  comparison_baseline.png       — training curves, no perturbation, all 3 algos
-  comparison_state_noise.png    — training curves, state noise group, all 3 algos
-  comparison_reward_noise.png   — training curves, reward noise group, all 3 algos
-  robustness_bar.png            — final avg reward bar chart, algo × perturbation
-  degradation_heatmap.png       — % performance drop vs baseline heatmap
-  summary.json                  — numerical results for Notebook / report
-  summary.txt                   — human-readable results table
-"""
-
 import json
 import os
 import random
@@ -42,10 +15,9 @@ import robust_gymnasium as gym
 from robust_gymnasium.configs.robust_setting import get_config
 
 
-# ── Shared Hyperparameters ────────────────────────────────────────────────────
 ENV_NAME       = "LunarLander-v3"
 SEED           = 42
-TOTAL_EPISODES = 600      # enough to see convergence without excessive runtime
+TOTAL_EPISODES = 600
 MAX_STEPS      = 1000
 GAMMA          = 0.99
 LR             = 5e-4
@@ -59,21 +31,15 @@ UPDATE_EVERY   = 4
 SOLVE_SCORE    = 200.0
 SAVE_DIR       = "results/compare_algorithms_perturbation_3DQN"
 
-# DQN / Double DQN hidden dim
 HIDDEN_STD     = 128
-# Dueling DDQN+PER hidden dim (wider for the two-stream architecture)
 HIDDEN_DUEL    = 256
 
-# PER parameters (Dueling only)
 PER_ALPHA      = 0.6
 BETA_START     = 0.4
 BETA_END       = 1.0
-
-# ── Experiment Matrix ─────────────────────────────────────────────────────────
 ALGO_NAMES = ["DQN", "DoubleDQN", "DuelingDDQN"]
 
 PERTURBATION_CONFIGS = [
-    # (label,              noise_factor, noise_type, noise_sigma)
     ("No Perturbation",    "none",       "gauss",    0.0),
     ("State σ=0.05",       "state",      "gauss",    0.05),
     ("State σ=0.10",       "state",      "gauss",    0.10),
@@ -82,7 +48,7 @@ PERTURBATION_CONFIGS = [
 ]
 
 
-# ═══ Networks ═════════════════════════════════════════════════════════════════
+# Networks 
 
 class MLP(nn.Module):
     """Standard two-hidden-layer Q-network used by DQN and Double DQN."""
@@ -117,9 +83,6 @@ class DuelingMLP(nn.Module):
         v = self.value(feat)
         a = self.advantage(feat)
         return v + a - a.mean(dim=1, keepdim=True)
-
-
-# ═══ Replay Buffers ═══════════════════════════════════════════════════════════
 
 class ReplayBuffer:
     def __init__(self, capacity: int):
@@ -178,7 +141,7 @@ class PrioritizedReplayBuffer:
         return self.size
 
 
-# ═══ Agents ═══════════════════════════════════════════════════════════════════
+#Agents
 
 class DQNAgent:
     """Vanilla DQN — uniform replay, standard Bellman target."""
@@ -201,7 +164,7 @@ class DQNAgent:
         with torch.no_grad():
             return int(self.qnet(s).argmax(1).item())
 
-    def step(self, s, a, r, ns, d, beta=0.4):     # beta unused in DQN
+    def step(self, s, a, r, ns, d, beta=0.4):
         self.buffer.push(s, a, r, ns, d)
         self.step_count += 1
         if self.step_count % UPDATE_EVERY == 0 and len(self.buffer) >= BATCH_SIZE:
@@ -241,8 +204,8 @@ class DoubleDQNAgent(DQNAgent):
         d  = torch.tensor(d,  dtype=torch.float32, device=self.device).unsqueeze(1)
         q  = self.qnet(s).gather(1, a)
         with torch.no_grad():
-            best_a  = self.qnet(ns).argmax(1, keepdim=True)       # online selects
-            q_next  = self.target_net(ns).gather(1, best_a)        # target evaluates
+            best_a  = self.qnet(ns).argmax(1, keepdim=True)
+            q_next  = self.target_net(ns).gather(1, best_a)
             target  = r + GAMMA * q_next * (1 - d)
         loss = nn.functional.mse_loss(q, target)
         self.optimizer.zero_grad()
@@ -306,8 +269,6 @@ class DuelingDDQNAgent:
     def decay_epsilon(self):
         self.epsilon = max(EPS_END, self.epsilon * EPS_DECAY)
 
-
-# ── Agent Factory ─────────────────────────────────────────────────────────────
 def make_agent(algo: str, state_dim: int, action_dim: int, device: torch.device):
     if algo == "DQN":
         return DQNAgent(state_dim, action_dim, device)
@@ -317,8 +278,6 @@ def make_agent(algo: str, state_dim: int, action_dim: int, device: torch.device)
         return DuelingDDQNAgent(state_dim, action_dim, device)
     raise ValueError(f"Unknown algorithm: {algo}")
 
-
-# ── Single Run ────────────────────────────────────────────────────────────────
 def train_single(algo: str, pert_label: str, noise_factor: str,
                  noise_type: str, noise_sigma: float, device) -> dict:
     print(f"\n{'─' * 60}")
@@ -388,7 +347,6 @@ def train_single(algo: str, pert_label: str, noise_factor: str,
     }
 
 
-# ── Visualization ─────────────────────────────────────────────────────────────
 COLORS = {
     "DQN":         "#4c8bca",
     "DoubleDQN":   "#f48024",
@@ -422,14 +380,12 @@ def plot_all(results: list, save_dir: str):
     algos     = ALGO_NAMES
     pert_list = [p[0] for p in PERTURBATION_CONFIGS]
 
-    # 1. Baseline comparison (no perturbation)
     fig, ax = plt.subplots(figsize=(9, 5))
     _plot_group(ax, results, algos, "No Perturbation", "Algorithm Comparison — No Perturbation")
     plt.tight_layout()
     fig.savefig(os.path.join(save_dir, "comparison_baseline.png"), dpi=150)
     plt.close(fig)
 
-    # 2. State noise group
     fig, axes = plt.subplots(1, 2, figsize=(14, 5))
     for ax, lbl in zip(axes, ["State σ=0.05", "State σ=0.10"]):
         _plot_group(ax, results, algos, lbl, f"State Noise — {lbl}")
@@ -437,7 +393,6 @@ def plot_all(results: list, save_dir: str):
     fig.savefig(os.path.join(save_dir, "comparison_state_noise.png"), dpi=150)
     plt.close(fig)
 
-    # 3. Reward noise group
     fig, axes = plt.subplots(1, 2, figsize=(14, 5))
     for ax, lbl in zip(axes, ["Reward σ=5.0", "Reward σ=10.0"]):
         _plot_group(ax, results, algos, lbl, f"Reward Noise — {lbl}")
@@ -445,7 +400,6 @@ def plot_all(results: list, save_dir: str):
     fig.savefig(os.path.join(save_dir, "comparison_reward_noise.png"), dpi=150)
     plt.close(fig)
 
-    # 4. Robustness bar chart: final avg reward, grouped by perturbation
     n_pert  = len(pert_list)
     n_algos = len(algos)
     x       = np.arange(n_pert)
@@ -473,13 +427,12 @@ def plot_all(results: list, save_dir: str):
     fig.savefig(os.path.join(save_dir, "robustness_bar.png"), dpi=150)
     plt.close(fig)
 
-    # 5. Degradation heatmap: % drop relative to each algorithm's own baseline
     baselines = {
         algo: next((r["final_avg"] for r in results
                     if r["algo"] == algo and r["pert_label"] == "No Perturbation"), 1.0)
         for algo in algos
     }
-    pert_noise_labels = [p[0] for p in PERTURBATION_CONFIGS[1:]]   # skip "No Perturbation"
+    pert_noise_labels = [p[0] for p in PERTURBATION_CONFIGS[1:]]
     matrix = np.zeros((len(algos), len(pert_noise_labels)))
     for i, algo in enumerate(algos):
         baseline = baselines[algo] if baselines[algo] != 0 else 1.0
@@ -527,7 +480,7 @@ def save_summary(results: list, save_dir: str):
         json.dump(json_data, f, indent=2)
 
 
-# ── Main ──────────────────────────────────────────────────────────────────────
+# Main
 def main():
     os.makedirs(SAVE_DIR, exist_ok=True)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
