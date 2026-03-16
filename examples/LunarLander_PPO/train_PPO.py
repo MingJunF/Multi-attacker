@@ -25,7 +25,7 @@ from robust_gymnasium.configs.robust_setting import get_config
 # ─── Hyperparameters ─────────────────────────────────────────────────────────
 ENV_NAME        = "LunarLander-v3"
 SEED            = 42
-TOTAL_EPISODES  = 1000         # 训练1000个episodes
+TOTAL_EPISODES  = 1000         
 MAX_STEPS       = 1000
 GAMMA           = 0.99
 GAE_LAMBDA      = 0.95
@@ -270,7 +270,7 @@ def plot_results(scores: list, avg_scores: list, value_losses: list, save_dir: s
     ax1.legend(loc="lower right")
     ax1.grid(True, alpha=0.3)
     
-    # Value loss plot - 与上图共享episode x轴
+    # Value loss plot 
     ax2.plot(episodes, value_losses, color="crimson")
     ax2.set_xlabel("Episode")
     ax2.set_ylabel("Value Loss")
@@ -359,7 +359,7 @@ def main():
     solved = False
     
     timesteps = 0
-    last_value_loss = 0.0  # 记录最近一次的value_loss
+    last_value_loss = 0.0  
     
     print(f"[INFO] Starting PPO training for {TOTAL_EPISODES:,} episodes...")
     
@@ -367,7 +367,7 @@ def main():
         episode_reward = 0.0
         state, _ = env.reset(seed=SEED + episode)
         
-        # 运行一个完整的episode
+     
         for step in range(MAX_STEPS):
             action, log_prob, value = agent.select_action(state)
             
@@ -388,25 +388,25 @@ def main():
             if done:
                 break
         
-        # 记录episode结果
+    
         scores.append(episode_reward)
         recent_scores.append(episode_reward)
         avg = np.mean(recent_scores) if recent_scores else episode_reward
         avg_scores.append(avg)
         
-        # PPO update - 当buffer足够大时更新
+        # PPO update 
         if len(agent.buffer) >= N_STEPS:
             policy_loss, value_loss, entropy = agent.update(state)
             last_value_loss = value_loss
         
-        # 每个episode都记录value_loss（使用最近一次的值）
+        
         value_losses.append(last_value_loss)
         
-        # 打印进度
+        
         if episode % 20 == 0:
             print(f"Episode {episode:4d} | Timestep {timesteps:7d} | Avg(100): {avg:7.1f}")
         
-        # 检查是否解决
+    
         if avg >= SOLVE_SCORE and not solved:
             solved = True
             print(f"\n*** Solved at episode {episode} with avg reward {avg:.1f} ***\n")
