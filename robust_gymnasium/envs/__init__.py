@@ -2,7 +2,11 @@
 from typing import Any
 
 from robust_gymnasium.envs.registration import make, pprint_registry, register, registry, spec
-from robust_gymnasium.envs import robosuite
+
+try:
+    from robust_gymnasium.envs import robosuite
+except Exception:
+    robosuite = None
 
 from robust_gymnasium.envs.robust_maze import maps
 from robust_gymnasium.envs import robust_ma_mujoco

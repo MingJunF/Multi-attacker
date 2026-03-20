@@ -1,0 +1,29 @@
+{
+  "device": "cuda:0",
+  "evaluation_env": {
+    "enable_wind": false,
+    "env_name": "RobustLunarLander-v3",
+    "gravity": -10.0,
+    "noise_factor": "none",
+    "noise_mu": 0.0,
+    "noise_shift": 0.0,
+    "noise_sigma": 0.0,
+    "noise_type": "none",
+    "turbulence_power": 1.5,
+    "wind_power": 15.0
+  },
+  "loaded_metadata": {
+    "critic_type": "v",
+    "mean_reward": 244.76016069999997,
+    "num_episodes": 100,
+    "seed": 1,
+    "stage": "final_100",
+    "std_reward": 58.01347759886362,
+    "timesteps": 10000000,
+    "update": 499999
+  },
+  "mean_reward": 239.40903106999997,
+  "model_path": "/home/infres/ziliu-24/Robust-Gymnasium/A2C-V/results/critic_compare/v/seed_1/models/best_model.pt",
+  "num_episodes": 100,
+  "std_reward": 57.51730561363861
+}

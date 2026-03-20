@@ -474,6 +474,9 @@ class LunarLander(gym.Env, EzPickle):
             self.world.DestroyBody(self.particles.pop(0))
 
     def step(self, robust_input):
+        # Handle raw action from internal reset() call
+        if not isinstance(robust_input, dict):
+            robust_input = {"action": robust_input, "robust_config": type('Config', (), {"noise_mu": 0.0, "noise_sigma": 0.0, "noise_factor": "none", "noise_type": "none", "noise_shift": 0.0})()}
         action = robust_input["action"]
         args = robust_input["robust_config"]
         mu = args.noise_mu

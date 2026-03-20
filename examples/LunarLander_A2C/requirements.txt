@@ -1,0 +1,6 @@
+gymnasium
+stable-baselines3
+ufal.pybox2d
+pygame
+numpy
+matplotlib
