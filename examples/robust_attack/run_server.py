@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Server campaign for HalfCheetah robustness attacks (portable + resumable).
 
-Phase 1 -- train victims:   HalfCheetah-v4, seed {1, 100}, --n_rollout_threads 16
+Phase 1 -- train victims:   HalfCheetah-v4, seed {1, 1000, 10000}, --n_rollout_threads 16
 Phase 2 -- train attackers:  for each victim seed, eps {0.05, 0.1, 0.15, 0.2}
            x algo {ippo, stage_mappo}, --n_rollout_threads 8
            (attacker seed == victim seed; each attacker loads its own victim ckpt)
@@ -54,7 +54,7 @@ def _int(name, default):
         return default
 
 ENV = "HalfCheetah-v4"
-SEEDS = [1, 100]
+SEEDS = [1, 1000, 10000]
 EPSES = [("005", 0.05), ("010", 0.1), ("015", 0.15), ("020", 0.2)]
 ALGOS = ["ippo", "stage_mappo"]
 
