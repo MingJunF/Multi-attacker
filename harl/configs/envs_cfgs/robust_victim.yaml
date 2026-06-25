@@ -1,0 +1,16 @@
+# Configuration for single-agent victim PPO training on robust_gymnasium.
+#
+# Train a "standard" MuJoCo agent here (one agent => PPO), then freeze the saved
+# actor (results/.../models/actor_agent0.pt) and plug it into the multi-attacker
+# via robust_attack.yaml `victim.type: harl`.
+#
+# IMPORTANT: keep `scenario` identical to the one used in robust_attack.yaml so
+# the victim and the attacker environment share the exact observation/action
+# spaces.
+
+# robust_gymnasium task id (must match robust_attack.yaml scenario).
+scenario: Ant-v4
+
+# Optional residual environment noise during victim training. Leave empty to
+# train a clean victim (recommended).
+background_noise: ~

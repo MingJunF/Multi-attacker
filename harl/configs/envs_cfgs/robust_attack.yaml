@@ -1,0 +1,122 @@
+# Configuration for the multi-attacker (robust_attack) environment.
+#
+# Two cooperative attacker agents (observation-attacker + action-attacker)
+# learn to degrade a FIXED victim policy inside a robust_gymnasium task.
+# Train it with any HARL on-policy algorithm:
+#   - mappo  (set algo.share_param: False -> two independent PPO attackers)
+#   - mappo  (set algo.share_param: True  -> shared-parameter MAPPO)
+#   - happo  (heterogeneous-agent PPO attackers)
+
+# robust_gymnasium task id used as the victim environment.
+scenario: HalfCheetah-v4
+
+# --- attacker composition --------------------------------------------------
+# Enable / disable each attacker. With both True there are 2 agents.
+attack_observation: True
+attack_action: True
+
+# --- attacker capability limits --------------------------------------------
+# The attacker is constrained by TWO independent limits:
+#   1. perturbation MAGNITUDE: a fixed absolute L_inf bound on every
+#      perturbation (independent of the budget).
+#   2. number of ATTACKS: the per-attacker budget further below.
+# Max magnitude of the observation perturbation added to the victim obs.
+epsilon_observation: 0.2
+# Max magnitude of the action perturbation added to the victim action.
+epsilon_action: 0.2
+# Whether to clip the corrupted observation back into the victim obs space.
+clip_observation: False
+# Scale applied to the (negative victim) attacker reward.
+reward_scale: 1.0
+
+# --- per-attacker attack budget (only affects the MARL attackers) ----------
+# Each attacker owns an INDEPENDENT budget that is spent every time it perturbs
+# the victim. Once the budget runs out, that attacker can no longer attack for
+# the rest of the episode (its perturbation is forced to zero). Budgets are
+# replenished at every reset(). Leave as ~ (null) for the original unbounded
+# attacker. These budgets never touch robust_gymnasium's own perturbations.
+#   budget_observation / budget_action: total per-episode budget (null = inf).
+#   budget_cost: how each step's spend is measured against the budget:
+#       count -> 1 per attack step (default; a hard cap on the NUMBER of attacks)
+#       l2    -> ||delta||_2   (magnitude/energy budget)
+#       l1    -> sum(|delta|)
+#       linf  -> max(|delta|)
+# A well-trained victim survives ~300 steps here, so 30 lets each attacker
+# tamper on ~1/10 of the steps (the two budgets are spent independently).
+# Set to ~ (null) to REMOVE the budget entirely: the attacker may attack on
+# every step (only the epsilon magnitude limit applies). This is simpler for the
+# attacker to learn.
+budget_observation: ~
+budget_action: ~
+budget_cost: count
+
+# --- attack deadzone (sparsity gate) ---------------------------------------
+# With a continuous policy the actor almost never outputs exactly zero, so under
+# a "count" budget EVERY step would spend budget even for a negligible
+# perturbation. The deadzone gives the attacker a free "do nothing" option: if
+# the (clipped) perturbation's L_inf magnitude is below attack_threshold it is
+# treated as NO attack -- it is not applied and costs no budget. The attacker
+# can thus abstain for free by keeping its output small, and only "commit" an
+# attack (cross the threshold) at the few critical moments that matter. Set to 0
+# to disable (every nonzero perturbation spends budget, the old behaviour).
+# A value well below epsilon (e.g. 0.1 with epsilon 0.5) works well.
+attack_threshold: 0
+
+# --- action-attacker observation -------------------------------------------
+# By default the action attacker is BLIND to the victim state: it only sees the
+# victim's action (its state slot is zero-masked). Set this True to also feed it
+# the victim's observation (the obs-corrupted state s~ that the victim actually
+# sees), so the action attacker observes BOTH the victim observation AND action.
+act_observe_state: False
+
+# --- centralized critic state (CTDE) ---------------------------------------
+# state_type selects how the centralized critic is fed:
+#   EP -> one global state, identical across agents (vanilla MAPPO).
+#   FP -> a per-agent global state; the single shared critic produces a value
+#         per agent. Required by MA-MAPPO.
+state_type: EP
+# causal_critic_state (MA-MAPPO): build the critic state PER AGENT, conditioned
+# on the information realized BEFORE that agent acts in the sequential attack
+# order, giving the exact chain advantage decomposition A = A_obs + A_act.
+#   obs-attacker (leader)  -> baseline V_o(s)          (delta_o slot zero-masked)
+#   act-attacker (follower) -> baseline Q_o(s, delta_o) (conditions on delta_o)
+# Use together with state_type: FP. Default False = vanilla MAPPO behaviour.
+causal_critic_state: False
+# two_head_critic (Stage-Aware MAPPO only): replace the single shared critic
+# head with TWO stage-specific value heads V^o / V^a on a shared backbone. The
+# active head is selected per sample from the trailing stage one-hot in the
+# critic state, so the two stage values stop sharing the final layer and no
+# longer pull each other. Only used by algo: stage_mappo (needs state_type: FP
+# and causal_critic_state: True). Default False = single shared head.
+two_head_critic: False
+
+# --- early-spend regularization --------------------------------------------
+# The budget is sparse, so without help the (initially random) attackers tend
+# to dump it all in the first few steps. This penalty is subtracted from the
+# attacker reward each time budget is spent, strong early and annealed to zero:
+#   penalty = reg_coef(t) * (spent_obs/budget_obs + spent_act/budget_act)
+#   reg_coef(t) anneals linearly from start to end over anneal_steps
+#   (counted in per-environment steps; each parallel worker anneals on its own).
+budget_reg_coef_start: 10.0
+budget_reg_coef_end: 0.0
+budget_reg_anneal_steps: 200000
+
+
+# --- victim policy ---------------------------------------------------------
+# type: random | zero | harl | callable
+#   random : victim samples random actions (no checkpoint needed, good for smoke tests)
+#   zero   : victim always outputs a zero action
+#   harl   : load a trained HARL StochasticPolicy actor checkpoint
+victim:
+  type: harl
+  model_path: /mnt/d/Github_Code/uncertainty/Robust-Gymnasium/results/robust_victim/HalfCheetah-v4/mappo/victim_halfcheetah/seed-00010-2026-06-24-22-04-33/models/actor_agent0.pt
+  device: cpu
+  deterministic: True
+  model_args:
+    hidden_sizes: [128, 128]
+
+# --- optional residual environment noise -----------------------------------
+# Leave empty to disable robust_gymnasium's built-in perturbations so the
+# attackers are the only source of disturbance. To layer attacks on top of
+# intrinsic noise, set e.g. {noise_factor: state, noise_type: gauss, noise_sigma: 0.01}.
+background_noise: ~
