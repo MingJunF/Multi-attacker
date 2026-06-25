@@ -23,7 +23,7 @@ SEED = 10
 THREADS = 8
 CONC = 2
 STEPS = 6_000_000
-EPSES = [("010", 0.1), ("015", 0.15)]
+EPSES = [("005", 0.05)]
 ALGOS = ["ippo", "stage_mappo"]
 
 
