@@ -9,6 +9,8 @@ data/
 .DS_Store
 _build/
 results/
+logs/
+*.log
 results_perturbation/
 .history/
 paper/
