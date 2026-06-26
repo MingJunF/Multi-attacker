@@ -206,6 +206,7 @@ class OnPolicyStageRunner(OnPolicyARRunner):
                 denorm = self.value_normalizer.denormalize(value_preds)
             advantages = returns - denorm
         else:
+            denorm = value_preds
             advantages = returns - value_preds
 
         # --- per-stage advantage normalization (FP) -------------------------
@@ -213,6 +214,10 @@ class OnPolicyStageRunner(OnPolicyARRunner):
             self.actor_buffer[i].active_masks for i in range(self.num_agents)
         ]
         active_masks_array = np.stack(active_masks_collector, axis=2)
+
+        # --- stage diagnostics (logging only; RAW pre-norm advantages) ------
+        stage_diag = self._stage_diagnostics(advantages, denorm, active_masks_array)
+
         for s in range(self.num_agents):
             adv_s = advantages[:, :, s].copy()
             adv_s[active_masks_array[:-1, :, s] == 0.0] = np.nan
@@ -240,5 +245,81 @@ class OnPolicyStageRunner(OnPolicyARRunner):
         critic_train_info = self.critic.train(
             self.critic_buffer, self.value_normalizer
         )
+        critic_train_info.update(stage_diag)
 
         return actor_train_infos, critic_train_info
+
+    def _stage_diagnostics(self, advantages, denorm, active_masks_array):
+        """Logging-only diagnostics for the stage-aware obs advantage.
+
+        Tests whether the obs-stage signal (a) predicts the true discounted
+        return and (b) points the same way as a plain return-based (IPPO-like)
+        reference advantage ``G_t - V^o(x^o_t)``. A low correlation / sign
+        agreement means the stage residual is steering the obs actor against
+        the return-based gradient, which would explain underperforming IPPO.
+
+        All quantities use the RAW (pre-normalization) per-stage advantages and
+        are masked to active obs-stage steps. Returns a dict of ``diag_*``
+        scalars merged into ``critic_train_info`` for the logger.
+        """
+        o = OnPolicyCriticBufferStage.LEADER    # obs attacker = 0
+        a = OnPolicyCriticBufferStage.FOLLOWER  # act attacker = 1
+        cb = self.critic_buffer
+        T = advantages.shape[0]
+
+        # Bootstrap V^o at step T (denormalized per stage).
+        if isinstance(self.value_normalizer, StageValueNorm):
+            boot = self.value_normalizer[o].denormalize(cb.value_preds[T, :, o])
+        elif self.value_normalizer is not None:
+            boot = self.value_normalizer.denormalize(cb.value_preds[T, :, o])
+        else:
+            boot = cb.value_preds[T, :, o]
+
+        # Monte-Carlo discounted return-to-go seen at each obs stage, built from
+        # the shared env reward (the signal a return-based PG would regress on).
+        gamma = cb.gamma
+        G = np.zeros((T,) + boot.shape, dtype=np.float32)
+        future = boot
+        for t in reversed(range(T)):
+            future = cb.rewards[t, :, o] + gamma * cb.masks[t + 1, :, o] * future
+            G[t] = future
+
+        v_o = denorm[:, :, o]         # V^o(x^o_t)
+        v_a = denorm[:, :, a]         # V^a(x^a_t)
+        resid = v_a - v_o             # delta_o (intra-step stage residual)
+        adv_o = advantages[:, :, o]   # full stage GAE advantage of the obs actor
+        ref_adv = G - v_o             # return-based (IPPO-like) advantage
+
+        mask = active_masks_array[:-1, :, o] != 0.0
+
+        def sel(x):
+            return x[mask].astype(np.float64).ravel()
+
+        resid_f = sel(resid)
+        advo_f = sel(adv_o)
+        ref_f = sel(ref_adv)
+        G_f = sel(G)
+        vo_f = sel(v_o)
+
+        def corr(x, y):
+            if x.size < 2 or x.std() < 1e-8 or y.std() < 1e-8:
+                return 0.0
+            return float(np.corrcoef(x, y)[0, 1])
+
+        def sign_agree(x, y):
+            if x.size == 0:
+                return 0.0
+            return float(np.mean(np.sign(x) == np.sign(y)))
+
+        eps = 1e-8
+        return {
+            "diag_resid_std": float(resid_f.std()) if resid_f.size else 0.0,
+            "diag_value_o_std": float(vo_f.std()) if vo_f.size else 0.0,
+            "diag_resid_to_value_ratio": (
+                float(resid_f.std() / (vo_f.std() + eps)) if resid_f.size else 0.0
+            ),
+            "diag_corr_resid_return": corr(resid_f, G_f),
+            "diag_corr_advo_refadv": corr(advo_f, ref_f),
+            "diag_sign_agree_advo_refadv": sign_agree(advo_f, ref_f),
+            "diag_sign_agree_resid_refadv": sign_agree(resid_f, ref_f),
+        }
