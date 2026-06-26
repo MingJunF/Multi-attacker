@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Server campaign for HalfCheetah robustness attacks (portable + resumable).
 
-Phase 1 -- train victims:   HalfCheetah-v4, seed {100000, 500}, --n_rollout_threads 16
+Phase 1 -- train victims:   HalfCheetah-v4, seed {500}, --n_rollout_threads 16
 Phase 2 -- train attackers:  for each victim seed, eps {0.05, 0.1, 0.15, 0.2}
            x algo {ippo, stage_mappo}, --n_rollout_threads 8
            (attacker seed == victim seed; each attacker loads its own victim ckpt)
@@ -54,7 +54,7 @@ def _int(name, default):
         return default
 
 ENV = "HalfCheetah-v4"
-SEEDS = [100000, 500]
+SEEDS = [500]
 EPSES = [("005", 0.05), ("010", 0.1), ("015", 0.15), ("020", 0.2)]
 ALGOS = ["ippo", "stage_mappo"]
 
@@ -66,9 +66,10 @@ VICTIM_STEPS = _int("VICTIM_STEPS", 6_000_000)
 ATTACK_STEPS = _int("ATTACK_STEPS", 6_000_000)
 EVAL_INTERVAL = _int("EVAL_INTERVAL", 25)
 USE_WANDB = os.environ.get("USE_WANDB", "True")
-# Phase 2 gate: only train attackers once you've confirmed the victim policy is good.
-# Default OFF -> this run trains victims only. Re-run with TRAIN_ATTACKERS=True later.
-TRAIN_ATTACKERS = os.environ.get("TRAIN_ATTACKERS", "False").lower() in ("1", "true", "yes")
+# Phase 2 gate: train attackers after the victim is confirmed good.
+# Default ON -> trains attackers (eps 005-020 x {ippo, stage_mappo}).
+# Set TRAIN_ATTACKERS=False to train victims only.
+TRAIN_ATTACKERS = os.environ.get("TRAIN_ATTACKERS", "True").lower() in ("1", "true", "yes")
 
 VICTIM_EXP = "victim_hc16"   # exp_name; results/robust_victim/<ENV>/mappo/victim_hc16/seed-*/
 
@@ -178,12 +179,12 @@ def main():
         f"attack: threads={ATTACK_THREADS} conc={ATTACK_CONC} steps={ATTACK_STEPS} | wandb={USE_WANDB}"
     )
 
-    # ---- Phase 1: victims (seed 1, 100) ----
+    # ---- Phase 1: victims (skip if a ckpt already exists) ----
     v_jobs = []
     for seed in SEEDS:
         name, cmd = victim_cmd(seed)
-        if is_done(name):
-            log_status(f"SKIP {name} (already done)")
+        if is_done(name) or victim_ckpt(seed) is not None:
+            log_status(f"SKIP {name} (already done or ckpt exists)")
             continue
         v_jobs.append((name, cmd))
     log_status(f"Phase 1: {len(v_jobs)} victim run(s) to train")

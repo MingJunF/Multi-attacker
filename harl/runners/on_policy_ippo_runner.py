@@ -17,6 +17,7 @@ import torch
 from harl.common.valuenorm import ValueNorm
 from harl.common.buffers.on_policy_critic_buffer_ep import OnPolicyCriticBufferEP
 from harl.algorithms.critics.v_critic import VCritic
+from harl.models.policy_models.masked_stochastic_policy import MaskedStochasticPolicy
 from harl.runners.on_policy_base_runner import OnPolicyBaseRunner
 from harl.utils.trans_tools import _t2n
 
@@ -39,6 +40,32 @@ class OnPolicyIPPORunner(OnPolicyBaseRunner):
         self._ar_rollout = (
             args["env"] == "robust_attack" and self.num_agents == 2
         )
+
+        # --- follower masked log-prob (matches stage_mappo) -----------------
+        # The action attacker (agent 1, follower) reports a PADDED action space
+        # but only its first ``valid_action_dim`` dims drive the victim. Restrict
+        # its PPO log-prob/entropy to those dims so the padding dims never
+        # pollute the importance ratio or the entropy bonus -- the continuous
+        # analogue of SMAC's avail_actions masking. The observation attacker
+        # (leader) has no padding (valid dim == pad dim) and is left untouched.
+        # Only for the robust_attack two-agent setup with independent actors.
+        if self._ar_rollout and not self.share_param:
+            follower_id = 1
+            follower_space = self.envs.action_space[follower_id]
+            valid_dim = int(
+                getattr(follower_space, "valid_action_dim", follower_space.shape[0])
+            )
+            fa = self.actor[follower_id]
+            if valid_dim < fa.act_space.shape[0]:
+                fa.actor = MaskedStochasticPolicy(
+                    fa.args, fa.obs_space, fa.act_space, valid_dim, fa.device
+                )
+                fa.actor_optimizer = torch.optim.Adam(
+                    fa.actor.parameters(),
+                    lr=fa.lr,
+                    eps=fa.opti_eps,
+                    weight_decay=fa.weight_decay,
+                )
 
         if self.algo_args["render"]["use_render"]:
             return
