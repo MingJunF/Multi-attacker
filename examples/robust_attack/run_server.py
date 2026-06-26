@@ -66,6 +66,9 @@ VICTIM_STEPS = _int("VICTIM_STEPS", 6_000_000)
 ATTACK_STEPS = _int("ATTACK_STEPS", 6_000_000)
 EVAL_INTERVAL = _int("EVAL_INTERVAL", 25)
 USE_WANDB = os.environ.get("USE_WANDB", "True")
+# Phase 2 gate: only train attackers once you've confirmed the victim policy is good.
+# Default OFF -> this run trains victims only. Re-run with TRAIN_ATTACKERS=True later.
+TRAIN_ATTACKERS = os.environ.get("TRAIN_ATTACKERS", "False").lower() in ("1", "true", "yes")
 
 VICTIM_EXP = "victim_hc16"   # exp_name; results/robust_victim/<ENV>/mappo/victim_hc16/seed-*/
 
@@ -186,6 +189,12 @@ def main():
     log_status(f"Phase 1: {len(v_jobs)} victim run(s) to train")
     run_pool(v_jobs, VICTIM_CONC)
     log_status("==== Phase 1 (victims) COMPLETE ====")
+
+    if not TRAIN_ATTACKERS:
+        log_status("TRAIN_ATTACKERS=False -> stopping after victims. "
+                   "Confirm victim policy, then re-run with TRAIN_ATTACKERS=True.")
+        log_status("==== VICTIM-ONLY CAMPAIGN COMPLETE ====")
+        return 0
 
     # ---- Phase 2: attacks, ordered seed -> eps -> algo (pair runs of same eps) ----
     a_jobs = []
