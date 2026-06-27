@@ -65,6 +65,13 @@ class OnPolicyStageRunner(OnPolicyARRunner):
         if _stage_lambda is None:
             _stage_lambda = self.algo_args["algo"]["gae_lambda"]
         self.critic_buffer.stage_lambda = float(_stage_lambda)
+        # Optional: drop the intra-step critic-difference term delta_o = V^a - V^o
+        # from the obs (leader) ACTOR advantage only (critic returns untouched),
+        # so adv_o -> stage_lambda * adv_a. Keep stage_lambda high (>=~0.95) or
+        # the reward-bearing adv_a is throttled and the obs actor stops learning.
+        self.stage_drop_delta_o = bool(
+            self.algo_args["algo"].get("stage_drop_delta_o", False)
+        )
 
         # --- per-stage value normalization (#2) -----------------------------
         # Replace the single critic with a stage-aware one that normalizes the
@@ -234,6 +241,17 @@ class OnPolicyStageRunner(OnPolicyARRunner):
         else:
             denorm = value_preds
             advantages = returns - value_preds
+
+        # --- optional: drop delta_o from the obs (leader) ACTOR advantage ----
+        # delta_o = V^a - V^o is the intra-step critic-difference term; removing
+        # it leaves adv_o = stage_lambda * adv_a (the obs actor is credited
+        # purely by the reward-bearing follower advantage). Critic returns are
+        # NOT modified here, so V^o/V^a targets stay correct.
+        if self.stage_drop_delta_o:
+            o = OnPolicyCriticBufferStage.LEADER
+            a = OnPolicyCriticBufferStage.FOLLOWER
+            delta_o = denorm[:, :, a] - denorm[:, :, o]
+            advantages[:, :, o] = advantages[:, :, o] - delta_o
 
         # --- per-stage advantage normalization (FP) -------------------------
         active_masks_collector = [
