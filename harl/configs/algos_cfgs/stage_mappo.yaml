@@ -120,8 +120,14 @@ algo:
   use_gae: True
   # discount factor
   gamma: 0.99
-  # GAE lambda
+  # GAE lambda (temporal credit across env steps, a_t -> o_{t+1})
   gae_lambda: 0.95
+  # Stage-coupling lambda for the obs (leader) advantage:
+  #   adv_o = delta_o + stage_lambda * adv_a
+  # null -> falls back to gae_lambda (original single-lambda behavior).
+  # 0.0  -> obs actor trains on the pure stage gap delta_o = V^a - V^o
+  #         (drops the follower-coupling term; lowest variance, most myopic).
+  stage_lambda: 0.7
   # whether to use huber loss
   use_huber_loss: True
   # whether to use policy active masks

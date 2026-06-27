@@ -51,7 +51,17 @@ class OnPolicyCriticBufferStage(OnPolicyCriticBufferFP):
 
         self.value_preds[-1] = next_value
         gamma = self.gamma
-        lam = self.gae_lambda
+        # Two decoupled GAE lambdas:
+        #   lam_time  -- temporal credit across env steps (a_t -> o_{t+1}).
+        #   lam_stage -- intra-step leader<-follower coupling (o_t -> a_t), i.e.
+        #                how much of the act (follower) advantage flows into the
+        #                obs (leader) advantage. Defaults to lam_time for exact
+        #                backward compatibility; set algo.stage_lambda to
+        #                decouple (lam_stage=0 -> the obs actor trains on the
+        #                pure stage gap delta_o = V^a - V^o, dropping the
+        #                follower-coupling term entirely).
+        lam_time = self.gae_lambda
+        lam_stage = getattr(self, "stage_lambda", self.gae_lambda)
 
         o = self.LEADER
         a = self.FOLLOWER
@@ -84,13 +94,13 @@ class OnPolicyCriticBufferStage(OnPolicyCriticBufferFP):
 
             # --- a-stage (act attacker): a_t -> o_{t+1}, reward r_t, discount gamma
             delta_a = r_t + gamma * v_o_tp1 * cont - v_a_t
-            adv_a = delta_a + gamma * lam * cont * adv_o_next
+            adv_a = delta_a + gamma * lam_time * cont * adv_o_next
             # On truncation, do not propagate the (bootstrapped) future credit.
             adv_a = adv_a * bad
 
             # --- o-stage (obs attacker): o_t -> a_t, no reward, no discount
             delta_o = v_a_t - v_o_t
-            adv_o = delta_o + lam * adv_a
+            adv_o = delta_o + lam_stage * adv_a
 
             self.returns[step, :, o] = adv_o + v_o_t
             self.returns[step, :, a] = adv_a + v_a_t

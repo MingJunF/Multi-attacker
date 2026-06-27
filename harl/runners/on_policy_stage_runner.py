@@ -56,6 +56,15 @@ class OnPolicyStageRunner(OnPolicyARRunner):
             "Stage-Aware MAPPO expects the FP critic buffer (state_type: FP)."
         )
         self.critic_buffer.__class__ = OnPolicyCriticBufferStage
+        # Decoupled stage-coupling lambda for the obs (leader) advantage:
+        #   adv_o = delta_o + stage_lambda * adv_a
+        # null/absent -> falls back to gae_lambda (identical to the old
+        # single-lambda behavior). stage_lambda=0 trains the obs actor on the
+        # pure stage gap delta_o = V^a - V^o.
+        _stage_lambda = self.algo_args["algo"].get("stage_lambda", None)
+        if _stage_lambda is None:
+            _stage_lambda = self.algo_args["algo"]["gae_lambda"]
+        self.critic_buffer.stage_lambda = float(_stage_lambda)
 
         # --- per-stage value normalization (#2) -----------------------------
         # Replace the single critic with a stage-aware one that normalizes the
