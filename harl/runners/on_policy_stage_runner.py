@@ -32,7 +32,6 @@ from harl.common.buffers.on_policy_critic_buffer_stage import (
 )
 from harl.common.stage_value_norm import StageValueNorm
 from harl.models.policy_models.masked_stochastic_policy import MaskedStochasticPolicy
-from harl.models.value_function_models.obs_counterfactual_q import ObsCounterfactualQ
 from harl.models.value_function_models.stage_v_net import StageVNet
 from harl.runners.on_policy_ar_runner import OnPolicyARRunner
 from harl.utils.trans_tools import _t2n
@@ -95,36 +94,6 @@ class OnPolicyStageRunner(OnPolicyARRunner):
                 lr=self.critic.critic_lr,
                 eps=self.critic.opti_eps,
                 weight_decay=self.critic.weight_decay,
-            )
-
-        # --- return-anchored counterfactual obs advantage (plan a) ----------
-        # Replace the noisy stage residual delta_o = V^a - V^o with a return-
-        # anchored counterfactual advantage A^o = Q^o(s_t, delta_o) - V^o(s_t).
-        # Q^o regresses the o-stage lambda-return on (clean state, perturbation);
-        # V^o (the stage critic) remains the perturbation-independent baseline.
-        self.obs_cf_q = None
-        if self.env_args.get("obs_counterfactual_q", False):
-            assert self.env_args.get("causal_critic_state", False), (
-                "obs_counterfactual_q needs the per-stage critic state (s_t is "
-                "read from the leader's critic state); pass --causal_critic_state "
-                "True."
-            )
-            # delta_o has the same dimension as the clean state slice s_t (the
-            # obs attacker perturbs the full observation; the leader is unpadded).
-            self.obs_cf_q_dim = int(self.envs.action_space[self.LEADER_ID].shape[0])
-            self.obs_cf_q_epochs = int(
-                self.env_args.get("obs_counterfactual_q_epochs", 5)
-            )
-            self.obs_cf_q = ObsCounterfactualQ(
-                self.critic.args,
-                self.obs_cf_q_dim,
-                self.obs_cf_q_dim,
-                device=self.critic.device,
-            )
-            self.obs_cf_q.setup_optimizer(
-                self.critic.critic_lr,
-                self.critic.opti_eps,
-                self.critic.weight_decay,
             )
 
         # --- follower masked log-prob (#1) ----------------------------------
@@ -248,57 +217,6 @@ class OnPolicyStageRunner(OnPolicyARRunner):
 
         # --- stage diagnostics (logging only; RAW pre-norm advantages) ------
         stage_diag = self._stage_diagnostics(advantages, denorm, active_masks_array)
-
-        # --- return-anchored counterfactual obs advantage (plan a) ----------
-        # Override the obs actor's advantage with A^o = Q^o(s_t, delta_o) -
-        # V^o(s_t), where Q^o is regressed on the o-stage lambda-return. Done
-        # AFTER diagnostics (so they still report the stage residual signal) and
-        # BEFORE per-stage normalization.
-        if self.obs_cf_q is not None:
-            o = self.LEADER_ID
-            sdim = self.obs_cf_q_dim
-            # s_t (clean state) from the leader's per-stage critic state and the
-            # realized perturbation delta_o (leader action).
-            s_t = self.critic_buffer.share_obs[:-1, :, o, :sdim]
-            delta_o = self.actor_buffer[o].actions
-            adim = delta_o.shape[-1]
-            target_o = returns[:, :, o]   # o-stage lambda-return (real scale)
-            v_o = denorm[:, :, o]         # V^o(s_t) baseline (real scale)
-
-            active_o = active_masks_array[:-1, :, o]
-            m = (active_o != 0.0).reshape(-1)
-            s_flat = s_t.reshape(-1, sdim)
-            a_flat = delta_o.reshape(-1, adim)
-            t_flat = target_o.reshape(-1, 1)
-            q_loss = self.obs_cf_q.train_q(
-                s_flat[m],
-                a_flat[m],
-                t_flat[m],
-                self.obs_cf_q_epochs,
-                self.critic.max_grad_norm,
-            )
-            q_pred = _t2n(self.obs_cf_q.get_values(s_flat, a_flat)).reshape(
-                target_o.shape
-            )
-            adv_o_cf = q_pred - v_o
-            advantages[:, :, o] = adv_o_cf
-
-            # logging: how the new return-anchored obs advantage aligns with the
-            # return-based reference advantage (lambda-return - V^o).
-            cf_f = adv_o_cf.reshape(-1)[m].astype(np.float64)
-            ref_f = (target_o - v_o).reshape(-1)[m].astype(np.float64)
-            stage_diag["diag_cf_q_loss"] = float(q_loss)
-            if cf_f.size >= 2 and cf_f.std() > 1e-8 and ref_f.std() > 1e-8:
-                stage_diag["diag_cf_corr_refadv"] = float(
-                    np.corrcoef(cf_f, ref_f)[0, 1]
-                )
-            else:
-                stage_diag["diag_cf_corr_refadv"] = 0.0
-            stage_diag["diag_cf_sign_refadv"] = (
-                float(np.mean(np.sign(cf_f) == np.sign(ref_f)))
-                if cf_f.size
-                else 0.0
-            )
 
         for s in range(self.num_agents):
             adv_s = advantages[:, :, s].copy()

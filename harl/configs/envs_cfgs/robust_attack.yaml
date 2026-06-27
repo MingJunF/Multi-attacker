@@ -89,20 +89,6 @@ causal_critic_state: False
 # longer pull each other. Only used by algo: stage_mappo (needs state_type: FP
 # and causal_critic_state: True). Default False = single shared head.
 two_head_critic: False
-# obs_counterfactual_q (Stage-Aware MAPPO only): replace the obs attacker's
-# advantage with a RETURN-ANCHORED counterfactual advantage
-#   A^o = Q^o(s_t, delta_o) - V^o(s_t),
-# where Q^o is a separate network regressing the o-stage lambda-return on the
-# clean state s_t and the chosen perturbation delta_o (it does NOT see the
-# downstream delta_a, so the act response is marginalized, not held fixed).
-# This fixes the depleted stage residual delta_o = V^a - V^o (a noisy
-# difference of two large values) by anchoring the obs credit on the real
-# return while keeping the baseline V^o(s_t) independent of delta_o (unbiased
-# obs policy gradient). Only used by algo: stage_mappo (needs state_type: FP and
-# causal_critic_state: True). Default False = use the plain stage GAE advantage.
-obs_counterfactual_q: False
-# Number of full-batch regression epochs per update for Q^o above.
-obs_counterfactual_q_epochs: 5
 
 # --- early-spend regularization --------------------------------------------
 # The budget is sparse, so without help the (initially random) attackers tend
