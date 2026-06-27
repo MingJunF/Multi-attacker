@@ -287,8 +287,18 @@ class OnPolicyStageRunner(OnPolicyARRunner):
         o = OnPolicyCriticBufferStage.LEADER    # obs attacker = 0
         a = OnPolicyCriticBufferStage.FOLLOWER  # act attacker = 1
 
-        # one full-batch sample (critic_num_mini_batch -> 1)
+        # one full-batch sample (critic_num_mini_batch -> 1). The generator
+        # draws ``torch.randperm`` to shuffle the minibatch, which would consume
+        # the global RNG and desynchronize the rest of training relative to a
+        # run with the probe disabled. Save/restore the RNG state so enabling
+        # this diagnostic leaves the training trajectory bit-identical.
+        rng_state = torch.get_rng_state()
+        if torch.cuda.is_available():
+            cuda_rng_state = torch.cuda.get_rng_state_all()
         sample = next(self.critic_buffer.feed_forward_generator_critic(1))
+        torch.set_rng_state(rng_state)
+        if torch.cuda.is_available():
+            torch.cuda.set_rng_state_all(cuda_rng_state)
         (
             share_obs_batch,
             rnn_states_critic_batch,
