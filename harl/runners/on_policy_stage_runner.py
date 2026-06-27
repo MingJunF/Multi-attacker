@@ -410,6 +410,7 @@ class OnPolicyStageRunner(OnPolicyARRunner):
         resid = v_a - v_o             # delta_o (intra-step stage residual)
         adv_o = advantages[:, :, o]   # full stage GAE advantage of the obs actor
         ref_adv = G - v_o             # return-based (IPPO-like) advantage
+        eta_a = G - v_a               # residual return below V^a (downstream/env/critic noise)
 
         mask = active_masks_array[:-1, :, o] != 0.0
 
@@ -421,6 +422,7 @@ class OnPolicyStageRunner(OnPolicyARRunner):
         ref_f = sel(ref_adv)
         G_f = sel(G)
         vo_f = sel(v_o)
+        eta_f = sel(eta_a)
 
         def corr(x, y):
             if x.size < 2 or x.std() < 1e-8 or y.std() < 1e-8:
@@ -433,6 +435,23 @@ class OnPolicyStageRunner(OnPolicyARRunner):
             return float(np.mean(np.sign(x) == np.sign(y)))
 
         eps = 1e-8
+
+        # --- variance decomposition of G - V^o = delta_o + eta_a ------------
+        # delta_o = V^a - V^o (obs intervention's conditional value gap),
+        # eta_a   = G - V^a   (downstream action sampling + env + critic error).
+        # If V^a fits the return well (high EV) AND Var(delta_o) << Var(eta_a),
+        # then the obs intervention's marginal value is genuinely small relative
+        # to downstream/env variance -- NOT merely an unfit critic. EV is the
+        # standard explained variance 1 - Var(G - V)/Var(G).
+        var_g = float(G_f.var()) if G_f.size else 0.0
+        var_resid = float(resid_f.var()) if resid_f.size else 0.0
+        var_eta = float(eta_f.var()) if eta_f.size else 0.0
+        cov_resid_eta = (
+            float(np.cov(resid_f, eta_f)[0, 1]) if resid_f.size > 1 else 0.0
+        )
+        ev_vo = 1.0 - float(ref_f.var()) / (var_g + eps) if G_f.size else 0.0
+        ev_va = 1.0 - var_eta / (var_g + eps) if G_f.size else 0.0
+
         return {
             "diag_resid_std": float(resid_f.std()) if resid_f.size else 0.0,
             "diag_value_o_std": float(vo_f.std()) if vo_f.size else 0.0,
@@ -443,4 +462,11 @@ class OnPolicyStageRunner(OnPolicyARRunner):
             "diag_corr_advo_refadv": corr(advo_f, ref_f),
             "diag_sign_agree_advo_refadv": sign_agree(advo_f, ref_f),
             "diag_sign_agree_resid_refadv": sign_agree(resid_f, ref_f),
+            # variance decomposition (delta_o vs eta_a) + critic explained variance
+            "diag_var_resid": var_resid,
+            "diag_var_eta_a": var_eta,
+            "diag_var_ratio_resid_eta": var_resid / (var_eta + eps),
+            "diag_cov_resid_eta": cov_resid_eta,
+            "diag_ev_vo_return": ev_vo,
+            "diag_ev_va_return": ev_va,
         }
