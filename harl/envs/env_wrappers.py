@@ -191,6 +191,8 @@ def shareworker(remote, parent_remote, env_fn_wrapper):
         elif cmd == "begin_step":
             obs, s_obs = env.begin_step(data)
             remote.send((obs, s_obs))
+        elif cmd == "probe_act_views":
+            remote.send(env.probe_act_views(data))
         elif cmd == "reset":
             ob, s_ob, available_actions = env.reset()
             remote.send((ob, s_ob, available_actions))
@@ -270,6 +272,17 @@ class ShareSubprocVecEnv(ShareVecEnv):
         obs, share_obs = zip(*results)
         return np.stack(obs), np.stack(share_obs)
 
+    def probe_act_views(self, deltas):
+        """Logging-only probe: per-env victim act-views for K candidate
+        obs-attacks. ``deltas``: (n_threads, K, pad_dim). Read-only (no env
+        state mutation). Returns ``(clean_states (n_threads, obs_dim),
+        act_views (n_threads, K, act_dim))``."""
+        for remote, d in zip(self.remotes, deltas):
+            remote.send(("probe_act_views", d))
+        results = [remote.recv() for remote in self.remotes]
+        clean_states, act_views = zip(*results)
+        return np.stack(clean_states), np.stack(act_views)
+
     def step_wait(self):
         results = [remote.recv() for remote in self.remotes]
         self.waiting = False
@@ -336,6 +349,15 @@ class ShareDummyVecEnv(ShareVecEnv):
         results = [env.begin_step(a) for (a, env) in zip(actions, self.envs)]
         obs, share_obs = map(np.array, zip(*results))
         return obs, share_obs
+
+    def probe_act_views(self, deltas):
+        """Logging-only probe: per-env victim act-views for K candidate
+        obs-attacks. ``deltas``: (n_threads, K, pad_dim). Read-only (no env
+        state mutation). Returns ``(clean_states (n_threads, obs_dim),
+        act_views (n_threads, K, act_dim))``."""
+        results = [env.probe_act_views(d) for (d, env) in zip(deltas, self.envs)]
+        clean_states, act_views = map(np.array, zip(*results))
+        return clean_states, act_views
 
     def step_wait(self):
         results = [env.step(a) for (a, env) in zip(self.actions, self.envs)]

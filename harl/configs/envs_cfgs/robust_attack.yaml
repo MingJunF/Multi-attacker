@@ -98,6 +98,18 @@ two_head_critic: False
 # Default False.
 grad_cos_diag: False
 
+# obs_spread_diag (Stage-Aware MAPPO only): logging-only obs-action value-spread
+# probe. Once per update, sample obs_spread_k obs-attacks u^o ~ pi^o at the
+# current state, query the victim for each (read-only), and measure the critic's
+# perceived value spread across obs-actions (diag_spread_pred_action_var /
+# action_range) and the intra-stage Bellman inconsistency E[V^o] vs mean_u V^a
+# (diag_spread_bellman_gap). Read-only: no env-state mutation, RNG saved/restored
+# so a run with the probe enabled stays bit-identical. Needs causal_critic_state:
+# True. Default False.
+obs_spread_diag: False
+# Number of obs-attacks sampled per env per update for obs_spread_diag.
+obs_spread_k: 16
+
 # --- early-spend regularization --------------------------------------------
 # The budget is sparse, so without help the (initially random) attackers tend
 # to dump it all in the first few steps. This penalty is subtracted from the

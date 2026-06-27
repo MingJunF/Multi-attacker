@@ -622,6 +622,45 @@ class RobustAttackEnv:
         ).reshape(-1)
         return victim_obs, spent_obs, victim_action
 
+    def probe_act_views(self, deltas):
+        """Logging-only probe: victim act-views for K candidate obs-attacks.
+
+        Given ``deltas`` of shape ``(K, pad_dim)`` (candidate leader / obs-attacker
+        padded actions), return the victim actions
+        ``victim.act(s + clip/deadzone(delta_o))`` at the CURRENT clean state
+        ``s = self._cur_state``, for each candidate, WITHOUT mutating any env
+        state: the per-episode budget is NOT charged (read-only), and
+        ``_committed`` / ``_last_delta_o`` / ``_cur_victim_action`` are left
+        untouched. The victim's recurrent state (if any) is snapshotted and
+        restored so a recurrent victim is unaffected. Used by the stage-aware
+        runner's obs-action value-spread diagnostic.
+
+        Returns ``(clean_state (obs_dim,), act_views (K, act_dim))``.
+        """
+        deltas = np.asarray(deltas, dtype=np.float32)
+        if deltas.ndim == 1:
+            deltas = deltas[None, :]
+        clean_state = self._cur_state.copy()
+        victim_rnn = getattr(self.victim, "_rnn_states", None)
+        if victim_rnn is not None:
+            victim_rnn = np.array(victim_rnn, copy=True)
+        act_views = np.zeros((deltas.shape[0], self.act_dim), dtype=np.float32)
+        for k in range(deltas.shape[0]):
+            delta_o = np.asarray(deltas[k], dtype=np.float32)[: self.obs_dim]
+            delta_o = np.clip(
+                delta_o, -self.epsilon_observation, self.epsilon_observation
+            )
+            delta_o = self._apply_deadzone(delta_o)
+            victim_obs = clean_state + delta_o
+            if self.clip_observation:
+                victim_obs = np.clip(victim_obs, self._obs_low, self._obs_high)
+            act_views[k] = np.asarray(
+                self.victim.act(victim_obs), dtype=np.float32
+            ).reshape(-1)
+        if victim_rnn is not None:
+            self.victim._rnn_states = victim_rnn
+        return clean_state, act_views
+
     def begin_step(self, leader_action):
         """AR rollout phase 1: commit the leader (observation) attack.
 

@@ -104,6 +104,15 @@ class OnPolicyStageRunner(OnPolicyARRunner):
         # conflict from head-level conflict. See ``_grad_cosine_diagnostics``.
         self.grad_cos_diag = bool(self.env_args.get("grad_cos_diag", False))
 
+        # Optional obs-action value-spread probe (logging only, default off):
+        # once per update, sample K obs-attacks u^o ~ pi^o at the current state,
+        # query the victim for each, and measure the critic's perceived value
+        # spread across obs-actions (pred_action_var/action_range) and the
+        # intra-stage Bellman inconsistency E[V^o] vs mean_u V^a (bellman_gap).
+        # See ``_obs_action_spread_diagnostics``.
+        self.obs_spread_diag = bool(self.env_args.get("obs_spread_diag", False))
+        self.obs_spread_k = int(self.env_args.get("obs_spread_k", 16))
+
         # --- follower masked log-prob (#1) ----------------------------------
         # The follower (action attacker) reports a padded action space but only
         # its first ``valid_action_dim`` dims drive the env. Restrict its PPO
@@ -256,6 +265,8 @@ class OnPolicyStageRunner(OnPolicyARRunner):
         critic_train_info.update(stage_diag)
         if self.grad_cos_diag:
             critic_train_info.update(self._grad_cosine_diagnostics())
+        if self.obs_spread_diag:
+            critic_train_info.update(self._obs_action_spread_diagnostics())
 
         return actor_train_infos, critic_train_info
 
@@ -370,6 +381,137 @@ class OnPolicyStageRunner(OnPolicyARRunner):
             "diag_gradnorm_a": float(g_a.norm()),
         }
 
+    def _obs_action_spread_diagnostics(self):
+        """Logging-only probe of the critic's obs-action value spread and of the
+        intra-stage Bellman consistency ``V^o(x^o) ?= E_{u^o ~ pi^o}[V^a(x^a)]``.
+
+        For each parallel env's CURRENT state ``s`` (the bootstrap row, aligned
+        with the leader's actor ``obs[-1]``), sample ``K`` obs-attacks
+        ``u^o ~ pi^o``, query the victim for each (read-only) to build
+        ``x^a_k = [s, victim.act(s + u^o), onehot_a]``, and evaluate the shared
+        critic::
+
+            q_k = V^a(x^a_k),   mu = mean_k q_k,   A_k = q_k - mu,   V^o = V^o(x^o)
+
+        Metrics (uniform 1/K weights -- ``u^o`` is continuous, so we SAMPLE, not
+        enumerate; hence the baseline is the simple mean, not a pi-weighted sum):
+
+          * ``diag_spread_pred_action_var`` = E_i mean_k A_k^2 -- the critic's
+            PERCEIVED spread of value across obs-actions. NOT the true marginal
+            effect: each V^a still carries the critic's V^a error e_a, so this
+            cannot by itself separate "true Delta small" from "e_a large".
+          * ``diag_spread_bellman_gap`` = E_i (V^o_i - mu_i)^2 -- intra-stage
+            Bellman inconsistency. Since V^o - mu = e_o - mean_u e_a (independent
+            of the true gap), a large value flags that the V^o / V^a heads are
+            mutually inconsistent -- exactly what a mean-zero dueling head would
+            remove. This is the most trustworthy of the four (no true-Delta
+            knowledge required).
+          * ``diag_spread_mean_abs_adv`` = E_ik |A_k|.
+          * ``diag_spread_action_range`` = E_i (max_k q - min_k q).
+
+        Read-only: ``torch.no_grad``, eval critic, victim recurrent state is
+        snapshotted/restored in the env, no optimizer/backward, no env-state
+        mutation. The ``u^o`` sampling consumes the global torch RNG, so the RNG
+        state is saved/restored to keep a run with the probe enabled bit-identical
+        to one without it.
+        """
+        # Stage routing (one-hot) is required to tell V^o from V^a.
+        if not self.env_args.get("causal_critic_state", False):
+            return {}
+
+        leader = self.LEADER_ID
+        K = self.obs_spread_k
+        lo = self.actor_buffer[leader]
+        obs = lo.obs[-1]            # (n, aug_obs_dim) current leader observation
+        rnn = lo.rnn_states[-1]     # (n, recurrent_n, hidden)
+        masks = lo.masks[-1]        # (n, 1)
+        n = obs.shape[0]
+
+        obs_t = np.repeat(obs, K, axis=0)
+        rnn_t = np.repeat(rnn, K, axis=0)
+        masks_t = np.repeat(masks, K, axis=0)
+        avail = (
+            np.repeat(lo.available_actions[-1], K, axis=0)
+            if lo.available_actions is not None
+            else None
+        )
+
+        # Sample K obs-attacks per env from pi^o. Save/restore RNG so enabling
+        # the probe leaves the training trajectory bit-identical.
+        rng_state = torch.get_rng_state()
+        if torch.cuda.is_available():
+            cuda_rng_state = torch.cuda.get_rng_state_all()
+        with torch.no_grad():
+            actions, _, _ = self.actor[leader].get_actions(
+                obs_t, rnn_t, masks_t, avail, deterministic=False
+            )
+        torch.set_rng_state(rng_state)
+        if torch.cuda.is_available():
+            torch.cuda.set_rng_state_all(cuda_rng_state)
+        deltas = _t2n(actions).reshape(n, K, -1)   # (n, K, pad_dim)
+
+        clean_states, act_views = self.envs.probe_act_views(deltas)
+        clean_states = np.asarray(clean_states, dtype=np.float32)  # (n, obs_dim)
+        act_views = np.asarray(act_views, dtype=np.float32)        # (n, K, act_dim)
+        act_dim = act_views.shape[-1]
+
+        o = OnPolicyCriticBufferStage.LEADER
+        a = OnPolicyCriticBufferStage.FOLLOWER
+        onehot_o = np.zeros(self.num_agents, dtype=np.float32)
+        onehot_o[o] = 1.0
+        onehot_a = np.zeros(self.num_agents, dtype=np.float32)
+        onehot_a[a] = 1.0
+
+        # x^o = [s, 0, onehot_o]  (n, share_dim)
+        xo = np.concatenate(
+            [
+                clean_states,
+                np.zeros((n, act_dim), dtype=np.float32),
+                np.tile(onehot_o, (n, 1)),
+            ],
+            axis=1,
+        )
+        # x^a = [s, victim.act(s + u^o), onehot_a]  (n*K, share_dim)
+        s_tiled = np.repeat(clean_states, K, axis=0)
+        av_flat = act_views.reshape(n * K, act_dim)
+        xa = np.concatenate(
+            [s_tiled, av_flat, np.tile(onehot_a, (n * K, 1))], axis=1
+        )
+
+        crit_rnn_shape = self.critic_buffer.rnn_states_critic.shape[-2:]
+
+        def values_for(share_obs):
+            m = share_obs.shape[0]
+            rnn0 = np.zeros((m,) + crit_rnn_shape, dtype=np.float32)
+            msk = np.ones((m, 1), dtype=np.float32)
+            with torch.no_grad():
+                v, _ = self.critic.get_values(share_obs, rnn0, msk)
+            return _t2n(v).reshape(m)
+
+        v_o = values_for(xo)        # (n,)
+        v_a = values_for(xa)        # (n*K,)
+
+        if isinstance(self.value_normalizer, StageValueNorm):
+            v_o = self.value_normalizer[o].denormalize(v_o)
+            v_a = self.value_normalizer[a].denormalize(v_a)
+        elif self.value_normalizer is not None:
+            v_o = self.value_normalizer.denormalize(v_o)
+            v_a = self.value_normalizer.denormalize(v_a)
+
+        v_o = np.asarray(v_o, dtype=np.float64).reshape(n)
+        q = np.asarray(v_a, dtype=np.float64).reshape(n, K)
+        mu = q.mean(axis=1)
+        adv = q - mu[:, None]
+
+        return {
+            "diag_spread_pred_action_var": float(np.mean(adv ** 2)),
+            "diag_spread_bellman_gap": float(np.mean((v_o - mu) ** 2)),
+            "diag_spread_mean_abs_adv": float(np.mean(np.abs(adv))),
+            "diag_spread_action_range": float(
+                np.mean(q.max(axis=1) - q.min(axis=1))
+            ),
+        }
+
     def _stage_diagnostics(self, advantages, denorm, active_masks_array):
         """Logging-only diagnostics for the stage-aware obs advantage.
 
@@ -452,6 +594,28 @@ class OnPolicyStageRunner(OnPolicyARRunner):
         ev_vo = 1.0 - float(ref_f.var()) / (var_g + eps) if G_f.size else 0.0
         ev_va = 1.0 - var_eta / (var_g + eps) if G_f.size else 0.0
 
+        # --- covariance-consistency probes (delta_o vs downstream residual) ---
+        # identity_error: ref_adv - delta_o - eta_a is an ALGEBRAIC tautology
+        # given the current construction (all three use the same G, v_o, v_a at
+        # the same index), so this is ~0 by machine precision. It only guards
+        # against NaN / masking / dtype corruption -- it CANNOT detect a stage
+        # time-index misalignment (that must be checked in the buffer).
+        identity_error = (
+            float(np.max(np.abs(ref_f - resid_f - eta_f))) if ref_f.size else 0.0
+        )
+        # orth_ratio = Cov(delta_o, eta_a) / Var(delta_o). For consistent nested
+        # conditional expectations this should be ~0; a value near -1 means the
+        # estimated delta_o is cancelled by the downstream residual (critic
+        # smoothing the small stage increment / misalignment / non-nested info).
+        orth_ratio = cov_resid_eta / (var_resid + eps)
+        # signal_recovery = Cov(delta_o, G - V^o) / Var(delta_o). ~1 means the
+        # estimated delta_o is fully recovered inside the residual return; ~0
+        # means it does not show up in the realized return at all.
+        cov_resid_ref = (
+            float(np.cov(resid_f, ref_f)[0, 1]) if resid_f.size > 1 else 0.0
+        )
+        signal_recovery = cov_resid_ref / (var_resid + eps)
+
         return {
             "diag_resid_std": float(resid_f.std()) if resid_f.size else 0.0,
             "diag_value_o_std": float(vo_f.std()) if vo_f.size else 0.0,
@@ -469,4 +633,9 @@ class OnPolicyStageRunner(OnPolicyARRunner):
             "diag_cov_resid_eta": cov_resid_eta,
             "diag_ev_vo_return": ev_vo,
             "diag_ev_va_return": ev_va,
+            # covariance-consistency probes (delta_o vs downstream residual)
+            "diag_corr_resid_refadv": corr(resid_f, ref_f),
+            "diag_identity_error": identity_error,
+            "diag_orth_ratio": orth_ratio,
+            "diag_signal_recovery": signal_recovery,
         }
