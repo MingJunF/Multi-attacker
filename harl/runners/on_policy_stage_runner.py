@@ -34,6 +34,8 @@ from harl.common.stage_value_norm import StageValueNorm
 from harl.models.policy_models.masked_stochastic_policy import MaskedStochasticPolicy
 from harl.models.value_function_models.stage_v_net import StageVNet
 from harl.runners.on_policy_ar_runner import OnPolicyARRunner
+from harl.utils.envs_tools import check
+from harl.utils.models_tools import huber_loss, mse_loss
 from harl.utils.trans_tools import _t2n
 
 
@@ -95,6 +97,12 @@ class OnPolicyStageRunner(OnPolicyARRunner):
                 eps=self.critic.opti_eps,
                 weight_decay=self.critic.weight_decay,
             )
+
+        # Optional gradient-interference probe (logging only, default off): once
+        # per update, measure cos(grad L^o, grad L^a) on the shared backbone and
+        # on the value head(s) separately to tell apart backbone representation
+        # conflict from head-level conflict. See ``_grad_cosine_diagnostics``.
+        self.grad_cos_diag = bool(self.env_args.get("grad_cos_diag", False))
 
         # --- follower masked log-prob (#1) ----------------------------------
         # The follower (action attacker) reports a padded action space but only
@@ -246,8 +254,111 @@ class OnPolicyStageRunner(OnPolicyARRunner):
             self.critic_buffer, self.value_normalizer
         )
         critic_train_info.update(stage_diag)
+        if self.grad_cos_diag:
+            critic_train_info.update(self._grad_cosine_diagnostics())
 
         return actor_train_infos, critic_train_info
+
+    def _grad_cosine_diagnostics(self):
+        """Gradient-interference probe between the o-stage and a-stage critic
+        losses, measured separately on the shared backbone and on the value
+        head(s).
+
+        Diagnostic only: uses ``torch.autograd.grad`` so it never touches the
+        optimizer state or the parameter ``.grad`` buffers, performs no update,
+        and (via ``normalize`` without ``update``) leaves the value-norm running
+        statistics untouched. One full-batch forward + two backward passes.
+
+        Interpretation (o = obs stage, a = act stage):
+          * ``diag_gradcos_backbone`` < 0  -> the two stage targets pull the
+            SHARED representation in opposing directions. A single-head critic
+            cannot fit both, which collapses the residual delta_o (explains
+            ``diag_corr_resid_return`` ~ 0). A two-head critic only decouples
+            the head, so a negative BACKBONE cosine means two heads cannot help
+            -- the fix is a separate encoder per stage.
+          * ``diag_gradcos_head``: for a single shared head this measures
+            head-level conflict; for ``two_head_critic`` the heads are disjoint
+            (gated), so this is ~0 by construction and serves as a sanity check.
+        """
+        net = self.critic.critic
+        if not hasattr(net, "base"):
+            return {}
+
+        o = OnPolicyCriticBufferStage.LEADER    # obs attacker = 0
+        a = OnPolicyCriticBufferStage.FOLLOWER  # act attacker = 1
+
+        # one full-batch sample (critic_num_mini_batch -> 1)
+        sample = next(self.critic_buffer.feed_forward_generator_critic(1))
+        (
+            share_obs_batch,
+            rnn_states_critic_batch,
+            value_preds_batch,
+            return_batch,
+            masks_batch,
+        ) = sample
+        return_batch = check(return_batch).to(**self.critic.tpdv)
+        stage_ids = check(share_obs_batch[..., -self.num_agents :]).to(
+            **self.critic.tpdv
+        )
+        stage_ids = stage_ids.argmax(dim=-1, keepdim=True)
+
+        values, _ = self.critic.get_values(
+            share_obs_batch, rnn_states_critic_batch, masks_batch
+        )
+
+        def stage_loss(s):
+            row = (stage_ids == s).squeeze(-1)
+            if not bool(row.any()):
+                return None
+            v = values[row]
+            tgt = return_batch[row]
+            if isinstance(self.value_normalizer, StageValueNorm):
+                tgt = self.value_normalizer[s].normalize(tgt)
+            elif self.value_normalizer is not None:
+                tgt = self.value_normalizer.normalize(tgt)
+            err = tgt - v
+            if self.critic.use_huber_loss:
+                return huber_loss(err, self.critic.huber_delta).mean()
+            return mse_loss(err).mean()
+
+        loss_o = stage_loss(o)
+        loss_a = stage_loss(a)
+        if loss_o is None or loss_a is None:
+            return {}
+
+        base_params = list(net.base.parameters())
+        head_params = [
+            p for n, p in net.named_parameters() if not n.startswith("base.")
+        ]
+        all_params = base_params + head_params
+        n_base = sum(p.numel() for p in base_params)
+
+        def flat_grad(loss, retain):
+            grads = torch.autograd.grad(
+                loss, all_params, retain_graph=retain, allow_unused=True
+            )
+            parts = [
+                (g if g is not None else torch.zeros_like(p)).reshape(-1)
+                for g, p in zip(grads, all_params)
+            ]
+            return torch.cat(parts)
+
+        g_o = flat_grad(loss_o, retain=True)
+        g_a = flat_grad(loss_a, retain=False)
+
+        def cos(x, y):
+            denom = x.norm() * y.norm()
+            if float(denom) < 1e-12:
+                return 0.0
+            return float((x @ y) / denom)
+
+        return {
+            "diag_gradcos_backbone": cos(g_o[:n_base], g_a[:n_base]),
+            "diag_gradcos_head": cos(g_o[n_base:], g_a[n_base:]),
+            "diag_gradcos_full": cos(g_o, g_a),
+            "diag_gradnorm_o": float(g_o.norm()),
+            "diag_gradnorm_a": float(g_a.norm()),
+        }
 
     def _stage_diagnostics(self, advantages, denorm, active_masks_array):
         """Logging-only diagnostics for the stage-aware obs advantage.

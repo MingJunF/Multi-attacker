@@ -90,6 +90,14 @@ causal_critic_state: False
 # and causal_critic_state: True). Default False = single shared head.
 two_head_critic: False
 
+# grad_cos_diag (Stage-Aware MAPPO only): logging-only gradient-interference
+# probe. Once per update, measure cos(grad L^o, grad L^a) on the shared critic
+# backbone and on the value head(s) separately, to tell apart backbone
+# representation conflict (diag_gradcos_backbone < 0) from head-level conflict.
+# Uses torch.autograd.grad: no optimizer step, no side effects on training.
+# Default False.
+grad_cos_diag: False
+
 # --- early-spend regularization --------------------------------------------
 # The budget is sparse, so without help the (initially random) attackers tend
 # to dump it all in the first few steps. This penalty is subtracted from the
