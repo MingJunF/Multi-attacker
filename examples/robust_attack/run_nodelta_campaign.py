@@ -66,7 +66,7 @@ USE_WANDB = os.environ.get("USE_WANDB", "True")
 EPSES = [("005", 0.05), ("010", 0.1), ("015", 0.15), ("020", 0.2)]
 
 HC_ENV = "HalfCheetah-v4"
-HC_SEEDS = [1, 10, 500, 1000]
+HC_SEEDS = [1, 500, 1000]   # HalfCheetah seed10 intentionally excluded
 
 ANT_ENV = "Ant-v4"
 ANT_SEEDS = [1, 10, 100, 1000, 10000]
