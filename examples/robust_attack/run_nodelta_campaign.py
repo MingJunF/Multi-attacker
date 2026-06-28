@@ -147,7 +147,11 @@ def attack_cmd(env_full, eps_tag, eps_val, seed, algo, vpath, nodelta):
         "--wandb_name", f"{algo}{suffix}_eps{eps_tag}_seed{seed}",
     ]
     if algo == "stage_mappo":
-        cmd += ["--state_type", "FP", "--causal_critic_state", "True"]
+        # stage_lambda MUST stay high (0.95): it leaks into the V^o critic target
+        # and (via the shared critic backbone) into V^a/adv_a, so the yaml default
+        # 0.7 noticeably weakens the attacker. 0.95 reproduces the good nodelta run.
+        cmd += ["--state_type", "FP", "--causal_critic_state", "True",
+                "--stage_lambda", "0.95"]
         if nodelta:
             cmd += ["--stage_drop_delta_o", "True"]
     return expname, cmd
