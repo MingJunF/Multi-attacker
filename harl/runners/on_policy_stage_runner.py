@@ -22,6 +22,8 @@ Requirements (set on the command line / env config):
     causal_critic_state: True (the env masks the leader's victim-action slot so
                                x^o = [s, 0]; the follower keeps x^a = [s, a^v])
 """
+import os
+
 import numpy as np
 import torch
 
@@ -72,6 +74,33 @@ class OnPolicyStageRunner(OnPolicyARRunner):
         self.stage_drop_delta_o = bool(
             self.algo_args["algo"].get("stage_drop_delta_o", False)
         )
+
+        # --- optional mid-run stage_lambda schedule (env-var driven) ---------
+        # When STAGE_LAMBDA_SWITCH_STEP is set, the obs-stage coupling
+        # stage_lambda is held at its initial value until cumulative env steps
+        # reach the threshold, then flipped to STAGE_LAMBDA_FINAL. This lets a
+        # single run train the first phase with delta_o + lam*A^a and the second
+        # phase with a different lam (e.g. lam=0 -> pure delta_o). Only
+        # compute_returns reads stage_lambda, so the switch is safe mid-run
+        # (no network surgery). Absent env var -> constant stage_lambda.
+        _switch = os.environ.get("STAGE_LAMBDA_SWITCH_STEP", "")
+        _final = os.environ.get("STAGE_LAMBDA_FINAL", "")
+        self._stage_lambda_switch_step = int(float(_switch)) if _switch else None
+        self._stage_lambda_final = float(_final) if _final else None
+        self._stage_lambda_switched = False
+        self._stage_lambda_elapsed = 0
+        self._stage_lambda_steps_per_episode = (
+            int(self.algo_args["train"]["episode_length"])
+            * int(self.algo_args["train"]["n_rollout_threads"])
+        )
+        if self._stage_lambda_switch_step is not None and self._stage_lambda_final is not None:
+            print(
+                f"[stage_lambda schedule] stage_lambda "
+                f"{self.critic_buffer.stage_lambda} for first "
+                f"{self._stage_lambda_switch_step} env steps, then "
+                f"-> {self._stage_lambda_final}",
+                flush=True,
+            )
 
         # --- per-stage value normalization (#2) -----------------------------
         # Replace the single critic with a stage-aware one that normalizes the
@@ -150,6 +179,33 @@ class OnPolicyStageRunner(OnPolicyARRunner):
                 eps=fa.opti_eps,
                 weight_decay=fa.weight_decay,
             )
+
+    @torch.no_grad()
+    def compute(self):
+        """Compute returns/advantages, applying the optional mid-run
+        ``stage_lambda`` switch before delegating to the base implementation.
+
+        Once cumulative env steps reach ``STAGE_LAMBDA_SWITCH_STEP``, the
+        obs-stage coupling ``stage_lambda`` flips to ``STAGE_LAMBDA_FINAL`` (a
+        no-op when the schedule env vars are unset).
+        """
+        if (
+            self._stage_lambda_switch_step is not None
+            and self._stage_lambda_final is not None
+            and not self._stage_lambda_switched
+            and self._stage_lambda_elapsed >= self._stage_lambda_switch_step
+        ):
+            old = self.critic_buffer.stage_lambda
+            self.critic_buffer.stage_lambda = self._stage_lambda_final
+            self._stage_lambda_switched = True
+            print(
+                f"[stage_lambda schedule] switching stage_lambda "
+                f"{old} -> {self._stage_lambda_final} at ~"
+                f"{self._stage_lambda_elapsed} env steps",
+                flush=True,
+            )
+        super().compute()
+        self._stage_lambda_elapsed += self._stage_lambda_steps_per_episode
 
     @torch.no_grad()
     def collect(self, step):
