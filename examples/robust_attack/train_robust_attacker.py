@@ -59,6 +59,7 @@ def main():
             "ma_mappo",
             "ar_mappo",
             "stage_mappo",
+            "stage_maddpg",
             "ippo",
             "r_mappo",
             "mappo_potential",

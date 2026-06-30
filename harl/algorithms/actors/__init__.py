@@ -23,6 +23,7 @@ ALGO_REGISTRY = {
     "hasac": HASAC,
     "had3qn": HAD3QN,
     "maddpg": MADDPG,
+    "stage_maddpg": MADDPG,
     "matd3": MATD3,
     "mappo": MAPPO,
     "ma_mappo": MAPPO,

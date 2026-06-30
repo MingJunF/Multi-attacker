@@ -6,6 +6,7 @@ from harl.runners.on_policy_ar_runner import OnPolicyARRunner
 from harl.runners.on_policy_stage_runner import OnPolicyStageRunner
 from harl.runners.off_policy_ha_runner import OffPolicyHARunner
 from harl.runners.off_policy_ma_runner import OffPolicyMARunner
+from harl.runners.off_policy_stage_runner import OffPolicyStageRunner
 
 RUNNER_REGISTRY = {
     "happo": OnPolicyHARunner,
@@ -16,6 +17,7 @@ RUNNER_REGISTRY = {
     "hasac": OffPolicyHARunner,
     "had3qn": OffPolicyHARunner,
     "maddpg": OffPolicyMARunner,
+    "stage_maddpg": OffPolicyStageRunner,
     "matd3": OffPolicyMARunner,
     "mappo": OnPolicyMARunner,
     "ma_mappo": OnPolicyMARunner,

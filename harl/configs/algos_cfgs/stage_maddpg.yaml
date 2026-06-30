@@ -1,0 +1,110 @@
+# Configuration for Stage-Aware MADDPG (off-policy ordered obs->act attack).
+#
+# Stage-MADDPG is the off-policy counterpart of Stage-Aware MAPPO. It keeps a
+# SINGLE shared centralized continuous Q critic but gives it a genuine two-stage
+# value structure with a coupled, stage-decomposed Bellman target (see
+# harl/algorithms/critics/stage_q_critic.py). Each env step is split into two
+# ordered decision stages driven by the same shared Q:
+#     o-stage (obs attacker, leader):   x^o = [s, 0, onehot_o]
+#     a-stage (act attacker, follower): x^a = [s, victim.act(s + delta_o), onehot_a]
+#     Q^a := Q(x^a, [delta_o, delta_a])      (act-stage value, full joint action)
+#     Q^o := Q(x^o, [delta_o,        0])     (obs-stage value, delta_a masked out)
+# Coupled one-step targets (TD0, n_step=1):
+#     y_a = r + gamma * cont * Q^o_target(x^o_{t+1}, [delta_o', 0])
+#     y_o = (1 - stage_lambda) * Q^a_target(x^a_t) + stage_lambda * y_a
+#
+# MUST be launched with the robust_attack env set to:
+#     --state_type FP --causal_critic_state True
+# (FP -> one critic produces a per-agent stage state; causal -> the env masks
+#  the leader's victim-action slot so x^o = [s, 0]). The two attackers are
+# heterogeneous, so actor parameter sharing is OFF.
+seed:
+  # whether to use the specified seed
+  seed_specify: True
+  # seed
+  seed: 1
+device:
+  # whether to use CUDA
+  cuda: True
+  # whether to set CUDA deterministic
+  cuda_deterministic: True
+  # arg to torch.set_num_threads
+  torch_threads: 4
+train:
+  # number of parallel environments for training data collection
+  n_rollout_threads: 10
+  # number of total steps
+  num_env_steps: 4050000
+  # number of warmup steps
+  warmup_steps: 10000
+  # number of steps per train
+  train_interval: 200
+  # ratio of training iterations to train_interval
+  update_per_train: 1
+  # logging interval (currently unused)
+  log_interval: ~
+  # evaluation / logging interval
+  eval_interval: 200
+  # whether to use linear learning rate decay
+  use_linear_lr_decay: False
+  # whether to consider the case of truncation when an episode is done
+  use_proper_time_limits: True
+  # if set, load models from this directory; otherwise, randomly initialise the models
+  model_dir: ~
+eval:
+  # whether to use evaluation (OFF: victim return is logged from training rollouts)
+  use_eval: False
+  # number of parallel environments for evaluation
+  n_eval_rollout_threads: 20
+  # number of episodes per evaluation
+  eval_episodes: 40
+render:
+  # whether to use render
+  use_render: False
+  # number of episodes to render
+  render_episodes: 10
+model:
+  # network parameters
+  # hidden sizes for mlp module in the network
+  hidden_sizes: [128, 128]
+  # activation function, choose from sigmoid, tanh, relu, leaky_relu, selu
+  activation_func: relu
+  # final activation function, choose from sigmoid, tanh, relu, leaky_relu, selu
+  final_activation_func: tanh
+  # optimizer parameters
+  # actor learning rate
+  lr: 0.0005
+  # critic learning rate
+  critic_lr: 0.001
+algo:
+  # discount factor
+  gamma: 0.99
+  # off-policy buffer size
+  buffer_size: 1000000
+  # training batch size
+  batch_size: 1000
+  # coefficient for target model soft update
+  polyak: 0.005
+  # exploration noise
+  expl_noise: 0.1
+  # the number of steps to look ahead (Stage-MADDPG assumes 1-step TD targets)
+  n_step: 1
+  # Stage-coupling lambda for the obs (leader) value target:
+  #   y_o = (1 - stage_lambda) * Q^a + stage_lambda * (r + gamma Q^o')
+  # 1.0 -> full downstream coupling (y_o = y_a); 0.0 -> pure intra-step obs
+  # value (y_o = Q^a, leakage-free, most myopic).
+  stage_lambda: 0.95
+  # whether to share parameter among actors (OFF: the two attackers are heterogeneous)
+  share_param: False
+  # whether to use a fixed optimisation order
+  fixed_order: True
+logger:
+  # logging directory
+  log_dir: "./results"
+  # whether to log to Weights & Biases
+  use_wandb: False
+  # wandb run settings (only used when use_wandb is True)
+  wandb_project: "robust-gymnasium"
+  wandb_entity: ~
+  wandb_group: ~
+  wandb_name: ~

@@ -8,6 +8,7 @@ from harl.algorithms.critics.soft_twin_continuous_q_critic import (
 )
 from harl.algorithms.critics.discrete_q_critic import DiscreteQCritic
 from harl.algorithms.critics.v_critic_potential import VCritic_Potential
+from harl.algorithms.critics.stage_q_critic import StageQCritic
 
 CRITIC_REGISTRY = {
     "happo": VCritic,
@@ -23,6 +24,7 @@ CRITIC_REGISTRY = {
     "hasac": SoftTwinContinuousQCritic,
     "had3qn": DiscreteQCritic,
     "maddpg": ContinuousQCritic,
+    "stage_maddpg": StageQCritic,
     "matd3": TwinContinuousQCritic,
     "potential": VCritic_Potential,
 }
