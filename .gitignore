@@ -15,3 +15,8 @@ results_perturbation/
 .history/
 paper/
 slides/
+
+# generated figures & exported plot data (not part of the runnable code)
+examples/robust_attack/*.png
+examples/robust_attack/*.csv
+examples/robust_attack/plot_data/
