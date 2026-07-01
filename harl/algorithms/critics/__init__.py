@@ -24,6 +24,7 @@ CRITIC_REGISTRY = {
     "hasac": SoftTwinContinuousQCritic,
     "had3qn": DiscreteQCritic,
     "maddpg": ContinuousQCritic,
+    "iddpg": ContinuousQCritic,
     "stage_maddpg": StageQCritic,
     "matd3": TwinContinuousQCritic,
     "potential": VCritic_Potential,
