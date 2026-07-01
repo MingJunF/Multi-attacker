@@ -44,6 +44,8 @@ class OffPolicyBaseRunner:
         self.state_type = env_args.get("state_type", "EP")
         self.share_param = algo_args["algo"]["share_param"]
         self.fixed_order = algo_args["algo"]["fixed_order"]
+        # log the victim's return under attack (attacker reward is its negative)
+        self.log_victim = args["env"] == "robust_attack"
 
         set_seed(algo_args["seed"])
         self.device = init_device(algo_args["device"])
@@ -206,15 +208,83 @@ class OffPolicyBaseRunner:
         elif "alpha" in self.algo_args["algo"].keys():
             self.alpha = [self.algo_args["algo"]["alpha"]] * self.num_agents
 
+    # ------------------------------------------------------------------ wandb
+    def _init_wandb(self):
+        """Initialise Weights & Biases logging from the ``logger`` config block.
+
+        Mirrors ``BaseLogger._init_wandb`` (the off-policy base runner has no
+        logger object). Logs the victim's average episode return under attack as
+        ``attack/victim_episode_rewards`` so MADDPG / IDDPG curves are directly
+        comparable with the on-policy attackers and Stage-MADDPG.
+        """
+        logger_cfg = self.algo_args.get("logger", {})
+        self.use_wandb = bool(logger_cfg.get("use_wandb", False))
+        self.wandb_run = None
+        if not self.use_wandb:
+            return
+        try:
+            import wandb
+        except ImportError:
+            print(
+                "[logger] use_wandb=True but the wandb package is not installed; "
+                "run `pip install wandb`. Disabling wandb."
+            )
+            self.use_wandb = False
+            return
+        self._wandb = wandb
+        default_name = "{}-{}-{}".format(
+            self.args["env"], self.args["algo"], self.args["exp_name"]
+        )
+        self.wandb_run = wandb.init(
+            project=logger_cfg.get("wandb_project", "robust-gymnasium"),
+            entity=logger_cfg.get("wandb_entity", None),
+            group=logger_cfg.get("wandb_group", None),
+            name=logger_cfg.get("wandb_name", None) or default_name,
+            tags=logger_cfg.get("wandb_tags", None),
+            mode=logger_cfg.get("wandb_mode", "online"),
+            dir=self.run_dir,
+            config={
+                "args": self.args,
+                "algo_args": self.algo_args,
+                "env_args": self.env_args,
+            },
+        )
+
+    def wandb_log(self, data, step):
+        """Log a flat dict of scalars to wandb (no-op when disabled)."""
+        if getattr(self, "use_wandb", False) and self.wandb_run is not None:
+            self._wandb.log(data, step=int(step))
+
+    def _track_victim(self, infos, dones):
+        """Accumulate per-thread victim episode returns from step infos."""
+        if not self.log_victim:
+            return
+        n_threads = self.algo_args["train"]["n_rollout_threads"]
+        dones_env = np.all(dones, axis=1)
+        for t in range(n_threads):
+            self.train_episode_victim_rewards[t] += infos[t][0].get(
+                "victim_reward", 0.0
+            )
+            if dones_env[t]:
+                self.done_episodes_victim_rewards.append(
+                    self.train_episode_victim_rewards[t]
+                )
+                self.train_episode_victim_rewards[t] = 0.0
+
     def run(self):
         """Run the training (or rendering) pipeline."""
         if self.algo_args["render"]["use_render"]:  # render, not train
             self.render()
             return
+        self._init_wandb()
         self.train_episode_rewards = np.zeros(
             self.algo_args["train"]["n_rollout_threads"]
         )
         self.done_episodes_rewards = []
+        self.train_episode_victim_rewards = np.zeros(
+            self.algo_args["train"]["n_rollout_threads"]
+        )
+        self.done_episodes_victim_rewards = []
         # warmup
         print("start warmup")
         obs, share_obs, available_actions = self.warmup()
@@ -262,6 +332,7 @@ class OffPolicyBaseRunner:
                 if len(np.array(available_actions).shape) == 3
                 else None,
             )
+            self._track_victim(infos, dones)
             self.insert(data)
             obs = new_obs
             share_obs = new_share_obs
@@ -281,6 +352,31 @@ class OffPolicyBaseRunner:
                     self.algo_args["train"]["warmup_steps"]
                     + step * self.algo_args["train"]["n_rollout_threads"]
                 )
+                log_data = {}
+                if len(self.done_episodes_rewards) > 0:
+                    aver_episode_rewards = np.mean(self.done_episodes_rewards)
+                    print(
+                        "Some episodes done, average episode reward is {}.\n".format(
+                            aver_episode_rewards
+                        )
+                    )
+                    self.log_file.write(
+                        ",".join(map(str, [cur_step, aver_episode_rewards])) + "\n"
+                    )
+                    self.log_file.flush()
+                    log_data["attack/attacker_episode_rewards"] = aver_episode_rewards
+                    self.done_episodes_rewards = []
+                if len(self.done_episodes_victim_rewards) > 0:
+                    aver_victim = np.mean(self.done_episodes_victim_rewards)
+                    print(
+                        "Victim average episode return under attack is {}.\n".format(
+                            aver_victim
+                        )
+                    )
+                    log_data["attack/victim_episode_rewards"] = aver_victim
+                    self.done_episodes_victim_rewards = []
+                if log_data:
+                    self.wandb_log(log_data, cur_step)
                 if self.algo_args["eval"]["use_eval"]:
                     print(
                         f"Env {self.args['env']} Task {self.task_name} Algo {self.args['algo']} Exp {self.args['exp_name']} Evaluation at step {cur_step} / {self.algo_args['train']['num_env_steps']}:"
@@ -290,18 +386,6 @@ class OffPolicyBaseRunner:
                     print(
                         f"Env {self.args['env']} Task {self.task_name} Algo {self.args['algo']} Exp {self.args['exp_name']} Step {cur_step} / {self.algo_args['train']['num_env_steps']}, average step reward in buffer: {self.buffer.get_mean_rewards()}.\n"
                     )
-                    if len(self.done_episodes_rewards) > 0:
-                        aver_episode_rewards = np.mean(self.done_episodes_rewards)
-                        print(
-                            "Some episodes done, average episode reward is {}.\n".format(
-                                aver_episode_rewards
-                            )
-                        )
-                        self.log_file.write(
-                            ",".join(map(str, [cur_step, aver_episode_rewards])) + "\n"
-                        )
-                        self.log_file.flush()
-                        self.done_episodes_rewards = []
                 self.save()
 
     def warmup(self):
@@ -635,6 +719,9 @@ class OffPolicyBaseRunner:
                 )
                 self.writter.add_scalar(
                     "eval_average_episode_length", eval_avg_len, step
+                )
+                self.wandb_log(
+                    {"attack/attacker_eval_episode_rewards": eval_avg_rew}, step
                 )
                 break
 
