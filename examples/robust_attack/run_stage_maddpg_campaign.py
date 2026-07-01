@@ -9,7 +9,7 @@ causal FP centralized state as the stage_mappo runs:
     --algo stage_maddpg --state_type FP --causal_critic_state True --stage_lambda 0.95
 
 Matrix (eps {0.05, 0.10, 0.15, 0.20} for every (env, seed)):
-    HalfCheetah-v4 : seeds {1, 100, 1000, 10000}        (seed10 already done locally)
+    HalfCheetah-v4 : seeds {1, 500, 1000}
     Ant-v4         : seeds {1, 10, 100, 1000, 10000}
     Hopper-v4      : seeds {1, 10, 100, 1000, 10000}
 
@@ -68,9 +68,9 @@ STAGE_LAMBDA = os.environ.get("STAGE_LAMBDA", "0.95")
 
 EPSES = [("005", 0.05), ("010", 0.1), ("015", 0.15), ("020", 0.2)]
 
-# per-env seed sets: HalfCheetah skips seed10 (already trained locally)
+# per-env seed sets: HalfCheetah has its own seed set {1, 500, 1000}
 ENV_SEEDS = {
-    "HalfCheetah-v4": [1, 100, 1000, 10000],
+    "HalfCheetah-v4": [1, 500, 1000],
     "Ant-v4": [1, 10, 100, 1000, 10000],
     "Hopper-v4": [1, 10, 100, 1000, 10000],
 }
