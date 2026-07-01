@@ -81,3 +81,11 @@ algo:
 logger:
   # logging directory
   log_dir: "./results"
+  # whether to log to Weights & Biases (standard on/off switch for the attacker)
+  use_wandb: False
+  # wandb run settings (only used when use_wandb is True)
+  wandb_project: "robust-gymnasium"
+  wandb_entity: ~
+  wandb_group: ~
+  wandb_name: ~
+  wandb_mode: "online"  # online / offline / disabled
