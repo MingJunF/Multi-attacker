@@ -138,6 +138,12 @@ def attack_cmd(env_full, eps_tag, eps_val, seed, vpath):
         # global state identical across agents; no stage-aware causal masking
         # and no coupled two-stage target (that is stage_maddpg).
         "--state_type", "EP", "--causal_critic_state", "False",
+        # Skip the periodic 40-episode evaluation (use_eval default True in the
+        # yaml). The plotted metric attack/victim_episode_rewards is logged from
+        # the training rollout regardless, so eval is pure overhead here. This
+        # matches stage_maddpg (whose runner never evals) and is the main reason
+        # vanilla maddpg/iddpg were much slower.
+        "--use_eval", "False",
         "--use_wandb", USE_WANDB,
         "--wandb_project", f"robust_attack_{env_full}",
         "--wandb_group", f"{short(env_full)}_eps{eps_tag}",

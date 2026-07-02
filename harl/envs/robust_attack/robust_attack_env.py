@@ -117,13 +117,45 @@ class RobustAttackEnv:
         else:
             self.env = rgym.make(scenario)
 
-        victim_obs_space = self.env.observation_space
+        # Maze tasks (PointMaze/AntMaze) use a plain-action ``step(action)`` API
+        # (not the mujoco/fetch ``robust_input`` dict) and expose a Dict
+        # observation {observation, achieved_goal, desired_goal}. Mirror
+        # RobustVictimEnv so the attacker operates on the SAME flattened Box
+        # state the victim policy was trained on.
+        self._maze_api = scenario.startswith("PointMaze") or scenario.startswith(
+            "AntMaze"
+        )
+        if self._maze_api:
+            # Disable the maze's built-in global-args noise; the attackers are
+            # the only perturbation source.
+            try:
+                import robust_gymnasium.envs.robust_maze.point_maze as _pm
+
+                _pm.args.noise_factor = "disable"
+            except Exception:
+                pass
+
+        raw_obs_space = self.env.observation_space
         victim_act_space = self.env.action_space
         if victim_act_space.__class__.__name__ != "Box":
             raise NotImplementedError(
                 "RobustAttackEnv currently supports continuous (Box) victim "
                 f"action spaces, got {type(victim_act_space)}."
             )
+
+        # Goal-conditioned tasks (maze) expose a Dict observation; flatten it to
+        # concat(observation, desired_goal) exactly like RobustVictimEnv so the
+        # obs dims (and the loaded victim policy) match.
+        self._goal_conditioned = raw_obs_space.__class__.__name__ == "Dict"
+        if self._goal_conditioned:
+            flat_dim = int(np.prod(raw_obs_space["observation"].shape)) + int(
+                np.prod(raw_obs_space["desired_goal"].shape)
+            )
+            victim_obs_space = Box(
+                low=-np.inf, high=np.inf, shape=(flat_dim,), dtype=np.float32
+            )
+        else:
+            victim_obs_space = raw_obs_space
 
         self.obs_dim = int(np.prod(victim_obs_space.shape))
         self.act_dim = int(np.prod(victim_act_space.shape))
@@ -577,6 +609,9 @@ class RobustAttackEnv:
 
     def _victim_step(self, action):
         """Step the underlying robust_gymnasium env with a (possibly attacked) action."""
+        if self._maze_api:
+            # Maze tasks take a plain action and ignore the robust_input dict.
+            return self.env.step(np.asarray(action, dtype=np.float32))
         robust_input = {
             "action": np.asarray(action, dtype=np.float32),
             "robust_type": self._robust_type,
@@ -585,6 +620,13 @@ class RobustAttackEnv:
         return self.env.step(robust_input)
 
     def _flatten_obs(self, obs):
+        if self._goal_conditioned:
+            return np.concatenate(
+                [
+                    np.asarray(obs["observation"], dtype=np.float32).reshape(-1),
+                    np.asarray(obs["desired_goal"], dtype=np.float32).reshape(-1),
+                ]
+            )
         return np.asarray(obs, dtype=np.float32).reshape(-1)
 
     # ----------------------------------------------------------------- API
