@@ -70,6 +70,10 @@ import robust_gymnasium as rgym
 from robust_gymnasium.spaces.box import Box
 
 from harl.envs.robust_attack.victim_policy import make_victim_policy
+from harl.envs.robust_attack.robosuite_builder import (
+    is_robosuite_scenario,
+    make_robosuite_env,
+)
 
 
 # Attacker roles. Order matters: it defines the agent indexing seen by HARL.
@@ -112,7 +116,15 @@ class RobustAttackEnv:
 
         # --- build the underlying victim environment -------------------------
         render_mode = self.args.get("render_mode", None)
-        if render_mode is not None:
+        if is_robosuite_scenario(scenario):
+            # robosuite is not gym-registered; build via suite.make + GymWrapper.
+            self.env = make_robosuite_env(
+                scenario,
+                render_mode=render_mode,
+                horizon=int(self.args.get("robosuite_horizon", 500)),
+                control_freq=int(self.args.get("robosuite_control_freq", 20)),
+            )
+        elif render_mode is not None:
             self.env = rgym.make(scenario, render_mode=render_mode)
         else:
             self.env = rgym.make(scenario)

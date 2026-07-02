@@ -38,12 +38,18 @@ TAG = os.environ.get("TAG", "")
 
 PATS = [
     ("stage_nodelta", re.compile(r"^stage_mappo_nodelta_eps(\d{3})_seed(\d+)(_rerun)?$")),
+    ("stage_maddpg",  re.compile(r"^stage_maddpg_eps(\d{3})_seed(\d+)(_rerun)?$")),
     ("stage",         re.compile(r"^stage_mappo_eps(\d{3})_seed(\d+)(_rerun)?$")),
+    ("mappo",         re.compile(r"^mappo_eps(\d{3})_seed(\d+)(_rerun)?$")),
     ("ippo",          re.compile(r"^ippo_eps(\d{3})_seed(\d+)(_rerun)?$")),
 ]
-COL = {"ippo": "#1f77b4", "stage": "#d62728", "stage_nodelta": "#2ca02c"}
+COL = {"ippo": "#1f77b4", "stage": "#d62728", "stage_nodelta": "#2ca02c",
+       "mappo": "#ff7f0e", "stage_maddpg": "#9467bd"}
 LBL = {"ippo": "IPPO", "stage": "stage_mappo (with $\\delta^o$)",
-       "stage_nodelta": "stage_mappo nodelta (drop $\\delta^o$)"}
+       "stage_nodelta": "stage_mappo nodelta (drop $\\delta^o$)",
+       "mappo": "MAPPO", "stage_maddpg": "stage_maddpg"}
+# Which algorithms to draw (comma-separated). Default: 4-way comparison.
+PLOT_ALGOS = os.environ.get("ALGOS", "ippo,mappo,stage,stage_maddpg").split(",")
 
 EDGES = np.linspace(0, NUM_STEPS, NBINS + 1)
 CENTERS = 0.5 * (EDGES[:-1] + EDGES[1:])
@@ -89,7 +95,7 @@ for r in runs:
         eps, seed = m.group(1), m.group(2)
         if eps not in EPS or seed not in SEEDS:
             break
-        if algo in ("stage", "stage_nodelta") and not stage_lambda_ok(r):
+        if algo in ("stage", "stage_nodelta", "stage_maddpg") and not stage_lambda_ok(r):
             break
         s = binned_series(r)
         if s is not None:
@@ -108,7 +114,7 @@ for (eps, algo, seed), (s, _nv) in best.items():
 for eps in EPS:
     plt.figure(figsize=(8, 5))
     any_data = False
-    for algo in ["ippo", "stage"]:
+    for algo in PLOT_ALGOS:
         series = data[eps][algo]
         if not series:
             continue
